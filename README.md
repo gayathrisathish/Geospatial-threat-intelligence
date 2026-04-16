@@ -1,4 +1,4 @@
-# GeoSentinel Backend (Person A Scope)
+# GeoSentinel Backend 
 
 FastAPI + SQLite backend for geospatial threat intelligence demos.
 
