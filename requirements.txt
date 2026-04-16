@@ -1,0 +1,8 @@
+fastapi==0.115.12
+uvicorn==0.34.0
+pandas==2.2.3
+numpy==2.2.4
+scikit-learn==1.6.1
+h3==4.2.1
+python-dateutil==2.9.0.post0
+httpx==0.28.1
