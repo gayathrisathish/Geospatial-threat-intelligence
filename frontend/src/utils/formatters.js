@@ -35,6 +35,10 @@ export function formatSignal(key, value) {
     total_fatalities: 'Fatalities',
     firms_signal: 'Thermal Activity',
     gdelt_sentiment: 'OSINT Sentiment',
+    population_density: 'Population Density',
+    population_vulnerability: 'Population Vulnerability',
+    environmental_risk: 'Environmental Risk',
+    economic_activity: 'Economic Activity',
   };
 
   const label = labels[key] || key;
@@ -42,12 +46,32 @@ export function formatSignal(key, value) {
   if (key === 'total_fatalities') {
     return `${label}: ${Math.round(value)}`;
   }
+  if (key === 'population_density') {
+    return `${label}: ${Math.round(value)} / km²`;
+  }
   if (key === 'gdelt_sentiment' || key === 'conflict_intensity') {
     return `${label}: ${value.toFixed(2)}`;
+  }
+  if (key === 'population_vulnerability') {
+    return `${label}: ${(value * 100).toFixed(1)}%`;
   }
   
   // firms_signal and others
   return `${label}: ${value.toFixed(1)}`;
+}
+
+export function formatRiskDriver(key, value) {
+  const labels = {
+    conflict_intensity: 'Conflict Intensity',
+    firms_signal: 'Thermal Activity',
+    gdelt_sentiment: 'OSINT Sentiment',
+    population_exposure: 'Population Exposure',
+    environmental_risk: 'Environmental Risk',
+    economic_activity: 'Economic Activity',
+  };
+
+  const label = labels[key] || key;
+  return `${label}: ${value.toFixed(1)}%`;
 }
 
 /**

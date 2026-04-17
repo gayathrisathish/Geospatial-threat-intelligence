@@ -44,12 +44,17 @@ def answer_question(question: str, hex_id: str | None = None) -> tuple[str, bool
     anomaly_text = "An anomaly is currently flagged." if context.anomaly else "No major anomaly is currently flagged."
     trend_text = _event_trend_text(context)
     intent = _question_intent(question)
+    drivers = ", ".join([f"{k} ({v:.1f}%)" for k, v in context.risk_drivers.items()])
+    if not drivers:
+        drivers = "insufficient driver data"
 
     if intent == "driver":
         answer = (
             f"This region is {risk_level} risk, primarily driven by {context.event_count} events, "
             f"{context.fatalities} fatalities, and a threat score of {context.threat_score:.2f}. "
-            f"{anomaly_text}"
+            f"Population/environment/economic indicators are also elevated "
+            f"(population density {context.population_density:.1f}, environmental risk {context.environmental_risk:.1f}, "
+            f"economic activity {context.economic_activity:.1f}). Top score drivers: {drivers}. {anomaly_text}"
         )
     elif intent == "severity":
         answer = (
@@ -61,7 +66,11 @@ def answer_question(question: str, hex_id: str | None = None) -> tuple[str, bool
         answer = f"Recent events in this hex include {event_preview}. {trend_text}"
     elif intent == "action":
         if risk_level in {"high", "critical"}:
-            answer = "Increase monitoring frequency, notify stakeholders, and validate any new anomaly indicators within the next reporting cycle."
+            answer = (
+                "Increase monitoring frequency, notify stakeholders, and validate anomaly indicators within the next reporting cycle. "
+                "If environmental risk rises further, pre-position response resources; if economically strategic zones are affected, "
+                "escalate continuity planning."
+            )
         elif risk_level == "medium":
             answer = "Maintain active monitoring and re-evaluate this sector after additional event updates."
         else:
@@ -70,7 +79,9 @@ def answer_question(question: str, hex_id: str | None = None) -> tuple[str, bool
         answer = (
             f"Hex {context.hex_id} is currently assessed as {risk_level.upper()} risk with "
             f"{context.event_count} events and {context.fatalities} fatalities. "
-            f"Threat score is {context.threat_score:.2f}. {anomaly_text}"
+            f"Threat score is {context.threat_score:.2f}. "
+            f"Environmental risk is {context.environmental_risk:.1f} and economic activity is {context.economic_activity:.1f}. "
+            f"Top drivers: {drivers}. {anomaly_text}"
         )
 
     return answer, True

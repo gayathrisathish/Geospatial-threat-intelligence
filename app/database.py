@@ -53,12 +53,30 @@ def init_schema() -> None:
                 conflict_intensity REAL NOT NULL,
                 firms_signal REAL NOT NULL,
                 gdelt_sentiment REAL NOT NULL,
+                population_density REAL NOT NULL DEFAULT 0,
+                population_vulnerability REAL NOT NULL DEFAULT 0,
+                environmental_risk REAL NOT NULL DEFAULT 0,
+                economic_activity REAL NOT NULL DEFAULT 0,
                 threat_score REAL NOT NULL,
                 anomaly_flag INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
             )
             """
         )
+
+        existing_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(hex_cells)").fetchall()
+        }
+        required_columns = {
+            "population_density": "REAL NOT NULL DEFAULT 0",
+            "population_vulnerability": "REAL NOT NULL DEFAULT 0",
+            "environmental_risk": "REAL NOT NULL DEFAULT 0",
+            "economic_activity": "REAL NOT NULL DEFAULT 0",
+        }
+        for column_name, column_sql in required_columns.items():
+            if column_name not in existing_columns:
+                cur.execute(f"ALTER TABLE hex_cells ADD COLUMN {column_name} {column_sql}")
 
         cur.execute(
             """

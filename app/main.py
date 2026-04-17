@@ -18,7 +18,7 @@ from app.schemas import (
     SitrepResponse,
 )
 from app.services.chat_service import answer_question
-from app.services.scoring import classify_alert
+from app.services.scoring import HexSignals, classify_alert, compute_top_risk_drivers
 from app.services.sitrep_service import build_summary, get_recommendation, get_risk_level, get_sitrep_context
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,10 @@ def get_hexgrid(min_score: float = 0.0) -> list[HexGridItem]:
                     h.total_fatalities,
                     h.firms_signal,
                     h.gdelt_sentiment,
+                    h.population_density,
+                    h.population_vulnerability,
+                    h.environmental_risk,
+                    h.economic_activity,
                     h.event_count,
                     MAX(e.event_date) AS last_event
                 FROM hex_cells h
@@ -108,6 +112,10 @@ def get_hexgrid(min_score: float = 0.0) -> list[HexGridItem]:
                     h.total_fatalities,
                     h.firms_signal,
                     h.gdelt_sentiment,
+                    h.population_density,
+                    h.population_vulnerability,
+                    h.environmental_risk,
+                    h.economic_activity,
                     h.event_count
                 ORDER BY h.threat_score DESC
                 """,
@@ -115,24 +123,43 @@ def get_hexgrid(min_score: float = 0.0) -> list[HexGridItem]:
             )
             rows = [dict(row) for row in cur.fetchall()]
 
-        return [
-            {
-                "hex_id": row["hex_id"],
-                "lat": row["lat"],
-                "lng": row["lng"],
-                "threat_score": row["threat_score"],
-                "anomaly_flag": row["anomaly_flag"],
-                "signals": {
-                    "conflict_intensity": row["conflict_intensity"],
-                    "total_fatalities": row["total_fatalities"],
-                    "firms_signal": row["firms_signal"],
-                    "gdelt_sentiment": row["gdelt_sentiment"],
-                },
-                "event_count": row["event_count"],
-                "last_event": row["last_event"],
-            }
-            for row in rows
-        ]
+        output = []
+        for row in rows:
+            signal_bundle = HexSignals(
+                event_count=int(row["event_count"]),
+                total_fatalities=int(row["total_fatalities"]),
+                firms_signal=float(row["firms_signal"]),
+                gdelt_sentiment=float(row["gdelt_sentiment"]),
+                population_density=float(row["population_density"]),
+                population_vulnerability=float(row["population_vulnerability"]),
+                environmental_risk=float(row["environmental_risk"]),
+                economic_activity=float(row["economic_activity"]),
+            )
+
+            output.append(
+                {
+                    "hex_id": row["hex_id"],
+                    "lat": row["lat"],
+                    "lng": row["lng"],
+                    "threat_score": row["threat_score"],
+                    "anomaly_flag": row["anomaly_flag"],
+                    "signals": {
+                        "conflict_intensity": row["conflict_intensity"],
+                        "total_fatalities": row["total_fatalities"],
+                        "firms_signal": row["firms_signal"],
+                        "gdelt_sentiment": row["gdelt_sentiment"],
+                        "population_density": row["population_density"],
+                        "population_vulnerability": row["population_vulnerability"],
+                        "environmental_risk": row["environmental_risk"],
+                        "economic_activity": row["economic_activity"],
+                    },
+                    "risk_drivers": compute_top_risk_drivers(signal_bundle),
+                    "event_count": row["event_count"],
+                    "last_event": row["last_event"],
+                }
+            )
+
+        return output
     except HTTPException:
         raise
     except Exception as exc:
@@ -152,6 +179,10 @@ def get_hex_detail(hex_id: str) -> HexDetailResponse:
                     conflict_intensity,
                     firms_signal,
                     gdelt_sentiment,
+                    population_density,
+                    population_vulnerability,
+                    environmental_risk,
+                    economic_activity,
                     threat_score,
                     anomaly_flag,
                     updated_at
@@ -162,6 +193,17 @@ def get_hex_detail(hex_id: str) -> HexDetailResponse:
             ).fetchone()
             if not cell:
                 return JSONResponse(status_code=404, content={"error": "hex not found", "hex_id": hex_id})
+
+            signal_bundle = HexSignals(
+                event_count=int(cell["event_count"]),
+                total_fatalities=int(cell["total_fatalities"]),
+                firms_signal=float(cell["firms_signal"]),
+                gdelt_sentiment=float(cell["gdelt_sentiment"]),
+                population_density=float(cell["population_density"]),
+                population_vulnerability=float(cell["population_vulnerability"]),
+                environmental_risk=float(cell["environmental_risk"]),
+                economic_activity=float(cell["economic_activity"]),
+            )
 
             events = conn.execute(
                 """
@@ -184,7 +226,10 @@ def get_hex_detail(hex_id: str) -> HexDetailResponse:
             ).fetchall()
 
         return {
-            "cell": dict(cell),
+            "cell": {
+                **dict(cell),
+                "risk_drivers": compute_top_risk_drivers(signal_bundle),
+            },
             "recent_events": [dict(event) for event in events],
         }
     except HTTPException:
@@ -205,7 +250,13 @@ def post_alert(body: dict[str, Any]) -> AlertResponse:
         with get_connection() as conn:
             cell = conn.execute(
                 """
-                SELECT threat_score, conflict_intensity, firms_signal, gdelt_sentiment
+                SELECT
+                    threat_score,
+                    conflict_intensity,
+                    firms_signal,
+                    gdelt_sentiment,
+                    environmental_risk,
+                    economic_activity
                 FROM hex_cells
                 WHERE hex_id = ?
                 """,
@@ -220,6 +271,8 @@ def post_alert(body: dict[str, Any]) -> AlertResponse:
                 conflict_intensity=float(cell["conflict_intensity"]),
                 firms_signal=float(cell["firms_signal"]),
                 gdelt_sentiment=float(cell["gdelt_sentiment"]),
+                environmental_risk=float(cell["environmental_risk"]),
+                economic_activity=float(cell["economic_activity"]),
             )
             if not crossed:
                 alert_type = "none"
@@ -262,13 +315,16 @@ def post_sitrep(payload: SitrepRequest) -> SitrepResponse:
 
         risk_level = get_risk_level(context.threat_score)
         summary = build_summary(context, risk_level)
-        recommendation = get_recommendation(risk_level, context.anomaly)
+        recommendation = get_recommendation(context, risk_level)
 
         metrics = SitrepMetrics(
             event_count=context.event_count,
             fatalities=context.fatalities,
             threat_score=context.threat_score,
             anomaly=context.anomaly,
+            population_density=context.population_density,
+            environmental_risk=context.environmental_risk,
+            economic_activity=context.economic_activity,
         )
 
         # Maintain compatibility with frontend components currently expecting a single text blob.
@@ -278,7 +334,10 @@ def post_sitrep(payload: SitrepRequest) -> SitrepResponse:
             "CLASSIFICATION: UNCLASSIFIED\n\n"
             f"SUMMARY: {summary}\n"
             f"METRICS: events={metrics.event_count}, fatalities={metrics.fatalities}, "
-            f"threat_score={metrics.threat_score:.2f}, anomaly={metrics.anomaly}\n"
+            f"threat_score={metrics.threat_score:.2f}, anomaly={metrics.anomaly}, "
+            f"population_density={metrics.population_density:.1f}, "
+            f"environmental_risk={metrics.environmental_risk:.1f}, "
+            f"economic_activity={metrics.economic_activity:.1f}\n"
             f"RISK LEVEL: {risk_level.upper()}\n"
             f"RECOMMENDATION: {recommendation}"
         )

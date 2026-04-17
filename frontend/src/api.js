@@ -4,6 +4,58 @@ const BASE = 'http://localhost:8000';
 const FORCE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 const FALLBACK_TO_MOCK = import.meta.env.VITE_FALLBACK_TO_MOCK !== 'false';
 
+function buildPrototypeSignals(cell) {
+  const existing = cell.signals || {};
+  const fatalities = Number(existing.total_fatalities ?? 0);
+  const eventCount = Number(cell.event_count ?? 0);
+  const basePopulationDensity = Math.min(1200, 120 + eventCount * 55 + fatalities * 0.8);
+  const populationVulnerability = Math.min(1, 0.25 + eventCount * 0.03 + fatalities / 1200);
+
+  return {
+    conflict_intensity: Number(existing.conflict_intensity ?? 0),
+    total_fatalities: fatalities,
+    firms_signal: Number(existing.firms_signal ?? 0),
+    gdelt_sentiment: Number(existing.gdelt_sentiment ?? 0),
+    population_density: Number(existing.population_density ?? basePopulationDensity),
+    population_vulnerability: Number(existing.population_vulnerability ?? populationVulnerability),
+    environmental_risk: Number(existing.environmental_risk ?? existing.firms_signal ?? 0),
+    economic_activity: Number(existing.economic_activity ?? Math.min(100, 25 + eventCount * 4)),
+  };
+}
+
+function buildPrototypeDrivers(signals) {
+  const raw = {
+    conflict_intensity: Math.min(100, Math.max(0, signals.conflict_intensity * 35)),
+    firms_signal: Math.min(100, Math.max(0, signals.firms_signal * 0.15)),
+    gdelt_sentiment: Math.min(100, Math.max(0, ((10 - signals.gdelt_sentiment) / 20) * 10)),
+    population_exposure: Math.min(100, Math.max(0, ((signals.population_density / 1200) * 0.6 + signals.population_vulnerability * 0.4) * 15)),
+    environmental_risk: Math.min(100, Math.max(0, signals.environmental_risk * 0.15)),
+    economic_activity: Math.min(100, Math.max(0, signals.economic_activity * 0.10)),
+  };
+
+  const entries = Object.entries(raw).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const total = entries.reduce((acc, [, value]) => acc + value, 0) || 1;
+  return Object.fromEntries(entries.map(([key, value]) => [key, Number(((value / total) * 100).toFixed(1))]));
+}
+
+function enrichCell(cell) {
+  const signals = buildPrototypeSignals(cell);
+  return {
+    ...cell,
+    signals,
+    risk_drivers: cell.risk_drivers || buildPrototypeDrivers(signals),
+  };
+}
+
+function enrichDetail(detail) {
+  if (!detail?.cell) return detail;
+  const cell = enrichCell(detail.cell);
+  return {
+    ...detail,
+    cell,
+  };
+}
+
 /**
  * Fetch all hex cells in the grid
  */
@@ -12,7 +64,7 @@ export async function fetchHexGrid() {
     if (FORCE_MOCK) {
       // Simulate network delay
       await new Promise(resolve => setTimeout(resolve, 300));
-      return { data: MOCK_HEXGRID, error: null };
+      return { data: MOCK_HEXGRID.map(enrichCell), error: null };
     }
 
     const response = await fetch(`${BASE}/hexgrid`);
@@ -24,7 +76,7 @@ export async function fetchHexGrid() {
   } catch (err) {
     if (FALLBACK_TO_MOCK) {
       await new Promise(resolve => setTimeout(resolve, 200));
-      return { data: MOCK_HEXGRID, error: `backend unavailable, using mock: ${err.message}` };
+      return { data: MOCK_HEXGRID.map(enrichCell), error: `backend unavailable, using mock: ${err.message}` };
     }
     return { data: null, error: err.message };
   }
@@ -37,7 +89,7 @@ export async function fetchHexDetail(hexId) {
   try {
     if (FORCE_MOCK) {
       await new Promise(resolve => setTimeout(resolve, 200));
-      return { data: MOCK_HEX_DETAIL, error: null };
+      return { data: enrichDetail(MOCK_HEX_DETAIL), error: null };
     }
 
     const response = await fetch(`${BASE}/hex/${hexId}`);
@@ -49,7 +101,7 @@ export async function fetchHexDetail(hexId) {
   } catch (err) {
     if (FALLBACK_TO_MOCK) {
       await new Promise(resolve => setTimeout(resolve, 120));
-      return { data: MOCK_HEX_DETAIL, error: `backend unavailable, using mock: ${err.message}` };
+      return { data: enrichDetail(MOCK_HEX_DETAIL), error: `backend unavailable, using mock: ${err.message}` };
     }
     return { data: null, error: err.message };
   }

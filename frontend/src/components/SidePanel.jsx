@@ -1,5 +1,5 @@
 import { threatColor, threatLabel } from '../utils/colorScale.js';
-import { formatHexId, formatScore, formatSignal, formatDate } from '../utils/formatters.js';
+import { formatHexId, formatScore, formatSignal, formatDate, formatRiskDriver } from '../utils/formatters.js';
 import ForecastPanel from './ForecastPanel.jsx';
 
 export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, onOpenChat, hexCells }) {
@@ -25,9 +25,15 @@ export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, on
     if (key === 'conflict_intensity') return Math.min(100, Math.max(0, value * 100));
     if (key === 'total_fatalities') return Math.min(100, Math.max(0, (value / 300) * 100));
     if (key === 'firms_signal') return Math.min(100, Math.max(0, value));
-    if (key === 'gdelt_sentiment') return Math.min(100, Math.max(0, ((-value + 1) / 11) * 100));
+    if (key === 'gdelt_sentiment') return Math.min(100, Math.max(0, ((10 - value) / 20) * 100));
+    if (key === 'population_density') return Math.min(100, Math.max(0, (value / 1200) * 100));
+    if (key === 'population_vulnerability') return Math.min(100, Math.max(0, value * 100));
+    if (key === 'environmental_risk') return Math.min(100, Math.max(0, value));
+    if (key === 'economic_activity') return Math.min(100, Math.max(0, value));
     return 0;
   };
+
+  const driverEntries = Object.entries(selectedHex.risk_drivers || hexDetail?.cell?.risk_drivers || {});
 
   return (
     <div className="h-full overflow-y-auto bg-slate-50 p-4 md:p-5">
@@ -100,6 +106,21 @@ export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, on
               );
             })}
           </div>
+        </section>
+
+        <section className="bg-white border border-slate-200 rounded-lg p-4">
+          <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-3">Top Risk Drivers</h3>
+          {driverEntries.length > 0 ? (
+            <div className="space-y-2">
+              {driverEntries.map(([key, value]) => (
+                <div key={key} className="flex items-center justify-between text-xs p-2 bg-slate-50 border border-slate-200 rounded">
+                  <span className="text-slate-700">{formatRiskDriver(key, value)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">No driver breakdown available yet.</p>
+          )}
         </section>
 
         <section className="bg-white border border-slate-200 rounded-lg p-4">

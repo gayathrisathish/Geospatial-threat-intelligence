@@ -8,7 +8,9 @@ FastAPI + SQLite backend for geospatial threat intelligence demos covering the C
 - Fallback synthetic event generation for offline demo
 - H3 hex assignment per event
 - Weighted threat score computation
+- Population, environmental, and economic prototype signals per hex
 - Isolation Forest anomaly flags
+- Risk-driver explainability (top contributing factors)
 - REST API endpoints:
   - `GET /hexgrid`
   - `GET /hex/{id}`

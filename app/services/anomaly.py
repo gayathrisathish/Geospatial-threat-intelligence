@@ -10,6 +10,10 @@ FEATURE_COLUMNS = [
     "conflict_intensity",
     "firms_signal",
     "gdelt_sentiment",
+    "population_density",
+    "population_vulnerability",
+    "environmental_risk",
+    "economic_activity",
     "threat_score",
 ]
 

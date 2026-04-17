@@ -11,9 +11,14 @@ class HexCell(BaseModel):
     conflict_intensity: float
     firms_signal: float
     gdelt_sentiment: float
+    population_density: float
+    population_vulnerability: float
+    environmental_risk: float
+    economic_activity: float
     threat_score: float
     anomaly_flag: int
     updated_at: datetime
+    risk_drivers: dict[str, float] | None = None
 
 
 class HexGridSignals(BaseModel):
@@ -21,6 +26,10 @@ class HexGridSignals(BaseModel):
     total_fatalities: int
     firms_signal: float
     gdelt_sentiment: float
+    population_density: float
+    population_vulnerability: float
+    environmental_risk: float
+    economic_activity: float
 
 
 class HexGridItem(BaseModel):
@@ -30,6 +39,7 @@ class HexGridItem(BaseModel):
     threat_score: float
     anomaly_flag: int
     signals: HexGridSignals
+    risk_drivers: dict[str, float] | None = None
     event_count: int
     last_event: str | None
 
@@ -62,6 +72,9 @@ class SitrepMetrics(BaseModel):
     fatalities: int
     threat_score: float
     anomaly: bool
+    population_density: float
+    environmental_risk: float
+    economic_activity: float
 
 
 class SitrepResponse(BaseModel):

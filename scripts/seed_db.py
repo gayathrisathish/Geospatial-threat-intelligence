@@ -17,10 +17,10 @@ from app.services.anomaly import compute_anomaly_flags
 from app.services.scoring import HexSignals, compute_conflict_intensity, compute_threat_score
 
 
-MANIPUR_LAT_MIN = 37.27
-MANIPUR_LAT_MAX = 53.83
-MANIPUR_LNG_MIN = 4.58
-MANIPUR_LNG_MAX = 81.97
+REGION_LAT_MIN = 37.27
+REGION_LAT_MAX = 53.83
+REGION_LNG_MIN = 4.58
+REGION_LNG_MAX = 81.97
 
 
 def _parse_args() -> argparse.Namespace:
@@ -88,12 +88,12 @@ def load_or_generate_events(acled_path: Path, row_count: int) -> pd.DataFrame:
             raise ValueError(f"ACLED CSV missing required columns: {missing}")
 
         out = df[list(rename_map.keys())].copy()
-        out["latitude"] = pd.to_numeric(out["latitude"], errors="coerce")
-        out["longitude"] = pd.to_numeric(out["longitude"], errors="coerce")
-        out["fatalities"] = pd.to_numeric(out["fatalities"], errors="coerce").fillna(0)
+        out.loc[:, "latitude"] = pd.to_numeric(out["latitude"], errors="coerce")
+        out.loc[:, "longitude"] = pd.to_numeric(out["longitude"], errors="coerce")
+        out.loc[:, "fatalities"] = pd.to_numeric(out["fatalities"], errors="coerce").fillna(0)
         out = out[
-            out["latitude"].between(MANIPUR_LAT_MIN, MANIPUR_LAT_MAX)
-            & out["longitude"].between(MANIPUR_LNG_MIN, MANIPUR_LNG_MAX)
+            out["latitude"].between(REGION_LAT_MIN, REGION_LAT_MAX)
+            & out["longitude"].between(REGION_LNG_MIN, REGION_LNG_MAX)
         ].copy()
         out["source"] = "acled"
         out["sentiment"] = None
@@ -143,7 +143,12 @@ def add_hex_ids(df: pd.DataFrame) -> pd.DataFrame:
 def build_hex_metrics(events_df: pd.DataFrame) -> pd.DataFrame:
     grouped = (
         events_df.groupby("hex_id", as_index=False)
-        .agg(event_count=("hex_id", "count"), total_fatalities=("fatalities", "sum"))
+        .agg(
+            event_count=("hex_id", "count"),
+            total_fatalities=("fatalities", "sum"),
+            mean_lat=("latitude", "mean"),
+            mean_lng=("longitude", "mean"),
+        )
         .reset_index(drop=True)
         .copy()
     )
@@ -156,6 +161,55 @@ def build_hex_metrics(events_df: pd.DataFrame) -> pd.DataFrame:
         gdelt_sentiment=grouped["event_count"].apply(
             lambda c: max(-1.0, min(1.0, random.gauss(-0.05 * c, 0.35)))
         ),
+    )
+
+    def _population_density(row: pd.Series) -> float:
+        rng = random.Random(f"pop-density:{row['hex_id']}")
+        urban_factor = 1.0 + (abs(float(row["mean_lng"]) - 45.0) / 100.0)
+        baseline = rng.uniform(70.0, 780.0) * urban_factor
+        boosted = baseline + (float(row["event_count"]) * 18.0)
+        return round(max(25.0, min(1500.0, boosted)), 2)
+
+    def _population_vulnerability(row: pd.Series) -> float:
+        rng = random.Random(f"pop-vuln:{row['hex_id']}")
+        base = rng.uniform(0.20, 0.75)
+        event_effect = min(0.2, float(row["event_count"]) / 60.0)
+        fatality_effect = min(0.2, float(row["total_fatalities"]) / 600.0)
+        return round(max(0.0, min(1.0, base + event_effect + fatality_effect)), 3)
+
+    grouped["population_density"] = grouped.apply(_population_density, axis=1)
+    grouped["population_vulnerability"] = grouped.apply(_population_vulnerability, axis=1)
+
+    grouped["environmental_risk"] = grouped.apply(
+        lambda row: round(
+            max(
+                0.0,
+                min(
+                    100.0,
+                    (0.55 * float(row["firms_signal"]))
+                    + (0.20 * float(row["event_count"]) * 4.5)
+                    + random.Random(f"env:{row['hex_id']}").uniform(8.0, 30.0),
+                ),
+            ),
+            2,
+        ),
+        axis=1,
+    )
+
+    grouped["economic_activity"] = grouped.apply(
+        lambda row: round(
+            max(
+                0.0,
+                min(
+                    100.0,
+                    random.Random(f"econ:{row['hex_id']}").uniform(20.0, 75.0)
+                    + (float(row["event_count"]) * 1.8)
+                    + (abs(float(row["mean_lng"]) - 50.0) / 7.0),
+                ),
+            ),
+            2,
+        ),
+        axis=1,
     )
 
     # Compute conflict_intensity
@@ -174,6 +228,10 @@ def build_hex_metrics(events_df: pd.DataFrame) -> pd.DataFrame:
                 total_fatalities=int(row["total_fatalities"]),
                 firms_signal=float(row["firms_signal"]),
                 gdelt_sentiment=float(row["gdelt_sentiment"]),
+                population_density=float(row["population_density"]),
+                population_vulnerability=float(row["population_vulnerability"]),
+                environmental_risk=float(row["environmental_risk"]),
+                economic_activity=float(row["economic_activity"]),
             )
         )
         threat_scores.append(ts)
@@ -190,6 +248,10 @@ def build_hex_metrics(events_df: pd.DataFrame) -> pd.DataFrame:
             "conflict_intensity",
             "firms_signal",
             "gdelt_sentiment",
+            "population_density",
+            "population_vulnerability",
+            "environmental_risk",
+            "economic_activity",
             "threat_score",
             "anomaly_flag",
             "updated_at",
@@ -244,10 +306,14 @@ def persist(events_df: pd.DataFrame, metrics_df: pd.DataFrame) -> None:
                 conflict_intensity,
                 firms_signal,
                 gdelt_sentiment,
+                population_density,
+                population_vulnerability,
+                environmental_risk,
+                economic_activity,
                 threat_score,
                 anomaly_flag,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -257,6 +323,10 @@ def persist(events_df: pd.DataFrame, metrics_df: pd.DataFrame) -> None:
                     float(row["conflict_intensity"]),
                     float(row["firms_signal"]),
                     float(row["gdelt_sentiment"]),
+                    float(row["population_density"]),
+                    float(row["population_vulnerability"]),
+                    float(row["environmental_risk"]),
+                    float(row["economic_activity"]),
                     float(row["threat_score"]),
                     int(row["anomaly_flag"]),
                     row["updated_at"],
