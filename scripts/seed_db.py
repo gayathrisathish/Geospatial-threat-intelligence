@@ -16,6 +16,12 @@ from app.services.anomaly import compute_anomaly_flags
 from app.services.scoring import HexSignals, compute_conflict_intensity, compute_threat_score
 
 
+MANIPUR_LAT_MIN = 23.8
+MANIPUR_LAT_MAX = 25.7
+MANIPUR_LNG_MIN = 93.0
+MANIPUR_LNG_MAX = 94.8
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build GeoSentinel SQLite database")
     parser.add_argument(
@@ -43,6 +49,13 @@ def load_or_generate_events(acled_path: Path, row_count: int) -> pd.DataFrame:
             raise ValueError(f"ACLED CSV missing required columns: {missing}")
 
         out = df[list(rename_map.keys())].copy()
+        out["latitude"] = pd.to_numeric(out["latitude"], errors="coerce")
+        out["longitude"] = pd.to_numeric(out["longitude"], errors="coerce")
+        out["fatalities"] = pd.to_numeric(out["fatalities"], errors="coerce").fillna(0)
+        out = out[
+            out["latitude"].between(MANIPUR_LAT_MIN, MANIPUR_LAT_MAX)
+            & out["longitude"].between(MANIPUR_LNG_MIN, MANIPUR_LNG_MAX)
+        ].copy()
         out["source"] = "acled"
         out["sentiment"] = None
         out["signal_strength"] = None
