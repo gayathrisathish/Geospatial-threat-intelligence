@@ -1,4 +1,4 @@
-import { threatColor, threatLabel } from '../utils/colorScale.js';
+import { threatColor, threatLabel, threatPlainLabel } from '../utils/colorScale.js';
 import { formatHexId, formatScore, formatSignal, formatDate, formatRiskDriver } from '../utils/formatters.js';
 import ForecastPanel from './ForecastPanel.jsx';
 
@@ -20,6 +20,7 @@ export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, on
   const score = selectedHex.threat_score;
   const threatCol = threatColor(score);
   const threatLab = threatLabel(score);
+  const threatCopy = threatPlainLabel(score);
 
   const normalizedSignal = (key, value) => {
     if (key === 'conflict_intensity') return Math.min(100, Math.max(0, value * 100));
@@ -34,10 +35,29 @@ export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, on
   };
 
   const driverEntries = Object.entries(selectedHex.risk_drivers || hexDetail?.cell?.risk_drivers || {});
+  const topDrivers = [...driverEntries]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+
+  const driverSummary = (key, value) => {
+    const summaries = {
+      conflict_intensity: `Conflict intensity contributes about ${Math.round(value)}% of the risk score.`,
+      firms_signal: `Thermal and incident signals contribute about ${Math.round(value)}% of current risk.`,
+      gdelt_sentiment: `Open-source sentiment pressure contributes about ${Math.round(value)}% to this risk.`,
+      population_exposure: `Population exposure contributes about ${Math.round(value)}% of expected impact.`,
+      environmental_risk: `Environmental pressure contributes about ${Math.round(value)}% of risk.`,
+      economic_activity: `Economic stress contributes about ${Math.round(value)}% to instability risk.`,
+    };
+
+    return summaries[key] || `${formatRiskDriver(key, value)} is a leading driver.`;
+  };
 
   return (
     <div className="h-full overflow-y-auto bg-slate-50 p-4 md:p-5">
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden mb-4">
+        <div className="px-4 py-2 border-b border-slate-200 bg-slate-100">
+          <span className="text-[11px] uppercase tracking-wide text-slate-600 font-semibold">Pinned sector details</span>
+        </div>
         <div className="flex items-center justify-between p-4 border-b border-slate-200">
           <div>
             <div className="text-xs text-slate-500 uppercase tracking-wide mb-1">
@@ -63,6 +83,9 @@ export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, on
             </span>
             <span className="text-xl text-slate-400">/ 100</span>
           </div>
+          <div className="text-sm font-semibold mt-2" style={{ color: threatCol }}>
+            {threatCopy}
+          </div>
         </div>
 
         {selectedHex.anomaly_flag === 1 && (
@@ -77,6 +100,22 @@ export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, on
 
       {/* Threat Propagation Forecast Section */}
       <ForecastPanel selectedHex={selectedHex} hexCells={hexCells} />
+
+      <section className="bg-white border border-slate-200 rounded-lg p-4 mb-4">
+        <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-2">Why this is high risk</h3>
+        {topDrivers.length > 0 ? (
+          <div className="space-y-2">
+            {topDrivers.map(([key, value]) => (
+              <div key={key} className="p-3 bg-slate-50 border border-slate-200 rounded">
+                <div className="text-xs font-semibold text-slate-800 mb-1">{formatRiskDriver(key, value)}</div>
+                <div className="text-xs text-slate-600">{driverSummary(key, value)}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500">No driver breakdown available yet.</p>
+        )}
+      </section>
 
       <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
         <section className="bg-white border border-slate-200 rounded-lg p-4">
@@ -112,7 +151,7 @@ export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, on
           <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-3">Top Risk Drivers</h3>
           {driverEntries.length > 0 ? (
             <div className="space-y-2">
-              {driverEntries.map(([key, value]) => (
+              {driverEntries.slice(0, 5).map(([key, value]) => (
                 <div key={key} className="flex items-center justify-between text-xs p-2 bg-slate-50 border border-slate-200 rounded">
                   <span className="text-slate-700">{formatRiskDriver(key, value)}</span>
                 </div>

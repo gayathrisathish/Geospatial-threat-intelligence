@@ -10,6 +10,34 @@ export function threatColor(score) {
 }
 
 /**
+ * Simple severity bucket for operator-facing labels
+ */
+export function severityBucket(score) {
+  if (score > 60) return 'high';
+  if (score > 30) return 'medium';
+  return 'low';
+}
+
+/**
+ * Plain-language risk label for UI copy
+ */
+export function threatPlainLabel(score) {
+  const bucket = severityBucket(score);
+  if (bucket === 'high') return 'High risk';
+  if (bucket === 'medium') return 'Medium risk';
+  return 'Low risk';
+}
+
+/**
+ * Convert confidence ratio (0-1) into a plain-language label
+ */
+export function confidencePlainLabel(confidence) {
+  if (confidence >= 0.75) return 'High confidence';
+  if (confidence >= 0.45) return 'Medium confidence';
+  return 'Low confidence';
+}
+
+/**
  * Get threat level label
  */
 export function threatLabel(score) {

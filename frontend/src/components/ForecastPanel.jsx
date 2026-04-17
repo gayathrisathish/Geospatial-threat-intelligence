@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fetchForecast } from '../api.js';
 import { formatForecastMetric } from '../services/forecast.js';
-import { threatColor, threatLabel } from '../utils/colorScale.js';
+import { confidencePlainLabel, threatColor, threatPlainLabel } from '../utils/colorScale.js';
 
 export default function ForecastPanel({ selectedHex, hexCells, onForecastChange }) {
   const [forecast, setForecast] = useState(null);
@@ -84,6 +84,7 @@ export default function ForecastPanel({ selectedHex, hexCells, onForecastChange 
   const projectedScore = forecastData.score;
   const escalationProb = forecastData.escalation_probability;
   const confidence = forecastData.confidence;
+  const confidenceLabel = confidencePlainLabel(confidence);
 
   // Determine if escalation is likely
   const isEscalating = projectedScore > currentScore;
@@ -169,7 +170,7 @@ export default function ForecastPanel({ selectedHex, hexCells, onForecastChange 
             <span className="text-xs text-slate-500">/ 100</span>
           </div>
           <div className="text-xs mt-1 text-slate-400">
-            {threatLabel(currentScore)}
+            {threatPlainLabel(currentScore)}
           </div>
         </div>
 
@@ -230,6 +231,19 @@ export default function ForecastPanel({ selectedHex, hexCells, onForecastChange 
             </div>
             <span className="text-sm font-bold w-10 text-right">
               {formatForecastMetric(confidence, 'confidence')}
+            </span>
+          </div>
+          <div className="mt-1">
+            <span
+              className={`inline-flex px-2 py-0.5 rounded text-[11px] font-semibold ${
+                confidence >= 0.75
+                  ? 'bg-emerald-900 text-emerald-200'
+                  : confidence >= 0.45
+                  ? 'bg-amber-900 text-amber-200'
+                  : 'bg-red-900 text-red-200'
+              }`}
+            >
+              {confidenceLabel}
             </span>
           </div>
         </div>
