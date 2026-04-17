@@ -51,3 +51,33 @@ class AlertResponse(BaseModel):
     crossed: bool
     alert_type: str
     created_at: datetime
+
+
+class SitrepRequest(BaseModel):
+    hex_id: str = Field(..., description="H3 cell identifier")
+
+
+class SitrepMetrics(BaseModel):
+    event_count: int
+    fatalities: int
+    threat_score: float
+    anomaly: bool
+
+
+class SitrepResponse(BaseModel):
+    hex_id: str
+    summary: str
+    metrics: SitrepMetrics
+    risk_level: str
+    recommendation: str
+    sitrep: str | None = Field(default=None, description="Optional formatted SITREP text for UI compatibility")
+
+
+class ChatRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+    hex_id: str | None = None
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    context_used: bool

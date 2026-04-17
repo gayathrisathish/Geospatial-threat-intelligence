@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #f1f5f9;
+  color: #0f172a;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
+/* Pulsing anomaly dot animation */
+@keyframes pulse-subtle {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.pulse-dot {
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Terminal-like glow effect for SITREP */
+@keyframes text-glow {
+  0%, 100% {
+    text-shadow: 0 0 8px rgba(22, 163, 74, 0.35);
+  }
+  50% {
+    text-shadow: 0 0 14px rgba(22, 163, 74, 0.55);
+  }
+}
+
+.text-glow {
+  animation: text-glow 2s ease-in-out infinite;
+}
+
+/* Pulsing dots loading animation */
+@keyframes dot-pulse {
+  0%, 60%, 100% {
+    opacity: 0.3;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.dot {
+  animation: dot-pulse 1.4s infinite;
+}
+
+.dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Leaflet overrides for dark theme */
+.leaflet-container {
+  background-color: #e2e8f0;
+}
+
+.leaflet-control-zoom-in, .leaflet-control-zoom-out {
+  background-color: #ffffff;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+}
+
+.leaflet-control-zoom-in:hover, .leaflet-control-zoom-out:hover {
+  background-color: #f1f5f9;
+}
+
+.leaflet-tooltip {
+  background-color: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.1);
+}
+
+.leaflet-tooltip-left::before {
+  border-left-color: #ffffff;
+}
+
+.leaflet-tooltip-right::before {
+  border-right-color: #ffffff;
+}
+
+.leaflet-tooltip-top::before {
+  border-top-color: #ffffff;
+}
+
+.leaflet-tooltip-bottom::before {
+  border-bottom-color: #ffffff;
+}

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -6,8 +7,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.database import get_connection, init_schema
-from app.schemas import AlertResponse, HexDetailResponse, HexGridItem
+from app.schemas import (
+    AlertResponse,
+    ChatRequest,
+    ChatResponse,
+    HexDetailResponse,
+    HexGridItem,
+    SitrepMetrics,
+    SitrepRequest,
+    SitrepResponse,
+)
+from app.services.chat_service import answer_question
 from app.services.scoring import classify_alert
+from app.services.sitrep_service import build_summary, get_recommendation, get_risk_level, get_sitrep_context
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="GeoSentinel API", version="0.1.0")
 
@@ -37,7 +51,7 @@ def root() -> dict:
             "status": "ok",
             "docs": "/docs",
             "health": "/health",
-            "endpoints": ["/hexgrid", "/hex/{hex_id}", "/alert"],
+            "endpoints": ["/hexgrid", "/hex/{hex_id}", "/alert", "/sitrep", "/chat"],
         }
     except HTTPException:
         raise
@@ -237,3 +251,65 @@ def post_alert(body: dict[str, Any]) -> AlertResponse:
         raise
     except Exception as exc:
         return _internal_error("/alert", f"failed to process alert request: {exc}")
+
+
+@app.post("/sitrep", response_model=SitrepResponse)
+def post_sitrep(payload: SitrepRequest) -> SitrepResponse:
+    try:
+        context = get_sitrep_context(payload.hex_id)
+        if context is None:
+            raise HTTPException(status_code=404, detail=f"hex not found: {payload.hex_id}")
+
+        risk_level = get_risk_level(context.threat_score)
+        summary = build_summary(context, risk_level)
+        recommendation = get_recommendation(risk_level, context.anomaly)
+
+        metrics = SitrepMetrics(
+            event_count=context.event_count,
+            fatalities=context.fatalities,
+            threat_score=context.threat_score,
+            anomaly=context.anomaly,
+        )
+
+        # Maintain compatibility with frontend components currently expecting a single text blob.
+        sitrep_text = (
+            "SITUATION REPORT (SITREP)\n"
+            f"HEX SECTOR: {context.hex_id}\n"
+            "CLASSIFICATION: UNCLASSIFIED\n\n"
+            f"SUMMARY: {summary}\n"
+            f"METRICS: events={metrics.event_count}, fatalities={metrics.fatalities}, "
+            f"threat_score={metrics.threat_score:.2f}, anomaly={metrics.anomaly}\n"
+            f"RISK LEVEL: {risk_level.upper()}\n"
+            f"RECOMMENDATION: {recommendation}"
+        )
+
+        return SitrepResponse(
+            hex_id=context.hex_id,
+            summary=summary,
+            metrics=metrics,
+            risk_level=risk_level,
+            recommendation=recommendation,
+            sitrep=sitrep_text,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to build sitrep for hex_id=%s", payload.hex_id)
+        raise HTTPException(status_code=500, detail=f"failed to generate sitrep: {exc}")
+
+
+@app.post("/chat", response_model=ChatResponse)
+def post_chat(payload: ChatRequest) -> ChatResponse:
+    try:
+        question = payload.question.strip()
+        if not question:
+            raise HTTPException(status_code=422, detail="question is required")
+
+        answer, context_used = answer_question(question=question, hex_id=payload.hex_id)
+
+        return ChatResponse(answer=answer, context_used=context_used)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to answer chat question")
+        raise HTTPException(status_code=500, detail=f"failed to generate chat response: {exc}")
