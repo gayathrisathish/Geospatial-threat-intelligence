@@ -94,3 +94,33 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     context_used: bool
+
+
+class ForecastPoint(BaseModel):
+    score: float
+    escalation_probability: float
+    confidence: float
+
+
+class ForecastBundle(BaseModel):
+    day_7: ForecastPoint
+    day_14: ForecastPoint
+    day_30: ForecastPoint
+
+
+class Influencer(BaseModel):
+    hex_id: str
+    distance_km: float
+    contribution: float
+    threat_level: float
+
+
+class ForecastResponse(BaseModel):
+    hex_id: str
+    current_score: float
+    forecast: ForecastBundle
+    influenced_by: list[Influencer]
+
+
+class ForecastRequest(BaseModel):
+    hex_id: str = Field(..., description="H3 cell identifier")

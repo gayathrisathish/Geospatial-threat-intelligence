@@ -11,6 +11,8 @@ from app.schemas import (
     AlertResponse,
     ChatRequest,
     ChatResponse,
+    ForecastRequest,
+    ForecastResponse,
     HexDetailResponse,
     HexGridItem,
     SitrepMetrics,
@@ -18,6 +20,7 @@ from app.schemas import (
     SitrepResponse,
 )
 from app.services.chat_service import answer_question
+from app.services.forecast_gnn import forecast_hex_with_trained_gnn
 from app.services.scoring import HexSignals, classify_alert, compute_top_risk_drivers
 from app.services.sitrep_service import build_summary, get_recommendation, get_risk_level, get_sitrep_context
 
@@ -51,7 +54,14 @@ def root() -> dict:
             "status": "ok",
             "docs": "/docs",
             "health": "/health",
-            "endpoints": ["/hexgrid", "/hex/{hex_id}", "/alert", "/sitrep", "/chat"],
+            "endpoints": [
+                "/hexgrid",
+                "/hex/{hex_id}",
+                "/alert",
+                "/sitrep",
+                "/chat",
+                "/forecast",
+            ],
         }
     except HTTPException:
         raise
@@ -372,3 +382,21 @@ def post_chat(payload: ChatRequest) -> ChatResponse:
     except Exception as exc:
         logger.exception("Failed to answer chat question")
         raise HTTPException(status_code=500, detail=f"failed to generate chat response: {exc}")
+
+
+@app.post("/forecast", response_model=ForecastResponse)
+def post_forecast(payload: ForecastRequest) -> ForecastResponse:
+    try:
+        result = forecast_hex_with_trained_gnn(payload.hex_id)
+        return ForecastResponse(**result)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to generate forecast for hex_id=%s", payload.hex_id)
+        raise HTTPException(status_code=500, detail=f"failed to generate forecast: {exc}")

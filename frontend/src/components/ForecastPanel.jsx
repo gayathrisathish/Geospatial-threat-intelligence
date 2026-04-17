@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { generateForecastForHex, formatForecastMetric } from '../services/forecast.js';
+import { fetchForecast } from '../api.js';
+import { formatForecastMetric } from '../services/forecast.js';
 import { threatColor, threatLabel } from '../utils/colorScale.js';
 
 export default function ForecastPanel({ selectedHex, hexCells, onForecastChange }) {
   const [forecast, setForecast] = useState(null);
+  const [forecastError, setForecastError] = useState('');
   const [horizon, setHorizon] = useState(14); // 7, 14, or 30
   const [isAnimating, setIsAnimating] = useState(false);
   const [animationDay, setAnimationDay] = useState(0);
@@ -11,15 +13,34 @@ export default function ForecastPanel({ selectedHex, hexCells, onForecastChange 
 
   // Generate forecast when hex changes
   useEffect(() => {
-    if (!selectedHex || !hexCells) {
+    const loadForecast = async () => {
+      if (!selectedHex) {
+        setForecast(null);
+        setForecastError('');
+        return;
+      }
+
+      const { data, error } = await fetchForecast(selectedHex.hex_id);
+      if (data) {
+        setForecast(data);
+        setForecastError('');
+      } else {
+        setForecast(null);
+        setForecastError(error || 'Forecast unavailable');
+      }
+
+      setAnimationDay(0);
+      setIsAnimating(false);
+    };
+
+    if (!selectedHex) {
       setForecast(null);
+      setForecastError('');
       return;
     }
-    const data = generateForecastForHex(selectedHex.hex_id, hexCells);
-    setForecast(data);
-    setAnimationDay(0);
-    setIsAnimating(false);
-  }, [selectedHex, hexCells]);
+
+    loadForecast();
+  }, [selectedHex]);
 
   // Handle animation loop
   useEffect(() => {
@@ -38,8 +59,21 @@ export default function ForecastPanel({ selectedHex, hexCells, onForecastChange 
     return () => clearInterval(interval);
   }, [isAnimating, forecast, horizon]);
 
-  if (!selectedHex || !forecast) {
+  if (!selectedHex) {
     return null;
+  }
+
+  if (!forecast) {
+    return (
+      <div className="bg-gradient-to-br from-slate-900 to-slate-800 border border-slate-700 rounded-lg p-5 mb-4 text-white">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-cyan-400 mb-3">
+          Threat Propagation Forecast
+        </h3>
+        <p className="text-sm text-slate-300">Live forecast is unavailable right now.</p>
+        {forecastError && <p className="text-xs text-red-300 mt-2">{forecastError}</p>}
+        <p className="text-xs text-slate-400 mt-3">Ensure backend is running on port 8001 and models are trained.</p>
+      </div>
+    );
   }
 
   // Get forecast data for selected horizon
@@ -246,9 +280,7 @@ export default function ForecastPanel({ selectedHex, hexCells, onForecastChange 
 
       {/* Info Notice */}
       <div className="mt-4 p-3 bg-cyan-900 border border-cyan-700 rounded text-xs text-cyan-200">
-        <span className="font-semibold">📊 Forecast Model:</span> This is a prototype forecast based on
-        heuristic propagation logic. A production system would use spatiotemporal ML models trained on
-        historical conflict data.
+        <span className="font-semibold">Forecast Source:</span> Real backend GNN inference from /forecast.
       </div>
     </div>
   );

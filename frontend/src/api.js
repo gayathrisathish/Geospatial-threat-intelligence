@@ -1,6 +1,6 @@
 import { MOCK_HEXGRID, MOCK_HEX_DETAIL } from './mockData.js';
 
-const BASE = 'http://localhost:8000';
+const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
 const FORCE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 const FALLBACK_TO_MOCK = import.meta.env.VITE_FALLBACK_TO_MOCK !== 'false';
 
@@ -299,6 +299,26 @@ export async function askQuestion(hexId, question) {
       const response = responses[Math.floor(Math.random() * responses.length)];
       return { data: { answer: response }, error: `backend unavailable, using mock: ${err.message}` };
     }
+    return { data: null, error: err.message };
+  }
+}
+
+/**
+ * Fetch trained GNN forecast for a specific hex cell
+ */
+export async function fetchForecast(hexId) {
+  try {
+    const response = await fetch(`${BASE}/forecast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hex_id: hexId }),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    return { data, error: null };
+  } catch (err) {
     return { data: null, error: err.message };
   }
 }

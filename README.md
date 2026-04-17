@@ -15,6 +15,7 @@ FastAPI + SQLite backend for geospatial threat intelligence demos covering the C
   - `GET /hexgrid`
   - `GET /hex/{id}`
   - `POST /alert`
+  - `POST /forecast`
   - `GET /health`
 
 ## Quick start
@@ -28,6 +29,33 @@ uvicorn app.main:app --reload
 ```
 
 API docs: http://127.0.0.1:8000/docs
+
+## GNN forecasting
+
+This repo now includes a trainable spatio-temporal GNN forecast pipeline:
+
+- Training script: `scripts/train_gnn.py`
+- Model/data service: `app/services/forecast_gnn.py`
+- API endpoint: `POST /forecast`
+
+Train all horizons (7/14/30 days):
+
+```bash
+python scripts/train_gnn.py --epochs 120
+```
+
+Request a forecast:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/forecast" \
+  -H "Content-Type: application/json" \
+  -d '{"hex_id":"85283083fffffff"}'
+```
+
+PyTorch compatibility note:
+
+- Forecast training/inference requires PyTorch.
+- Use Python 3.11 or 3.12 for the most reliable torch wheel support.
 
 ## Data notes
 
