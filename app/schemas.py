@@ -16,10 +16,22 @@ class HexCell(BaseModel):
     updated_at: datetime
 
 
-class HexGridResponse(BaseModel):
-    generated_at: datetime
-    count: int
-    items: list[HexCell]
+class HexGridSignals(BaseModel):
+    conflict_intensity: float
+    total_fatalities: int
+    firms_signal: float
+    gdelt_sentiment: float
+
+
+class HexGridItem(BaseModel):
+    hex_id: str
+    lat: float
+    lng: float
+    threat_score: float
+    anomaly_flag: int
+    signals: HexGridSignals
+    event_count: int
+    last_event: str | None
 
 
 class HexDetailResponse(BaseModel):

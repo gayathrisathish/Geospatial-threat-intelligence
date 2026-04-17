@@ -1,0 +1,75 @@
+{
+  "GET /hexgrid": [
+    {
+      "hex_id": "851e6cb7fffffff",
+      "lat": 51.072599,
+      "lng": 33.580763,
+      "threat_score": 46.11,
+      "anomaly_flag": 1,
+      "signals": {
+        "conflict_intensity": 0.124,
+        "total_fatalities": 8,
+        "firms_signal": 80.956572213881,
+        "gdelt_sentiment": -0.5625674963050683
+      },
+      "event_count": 1,
+      "last_event": "2026-03-14"
+    },
+    {
+      "hex_id": "85535cc7fffffff",
+      "lat": 23.211049,
+      "lng": 48.285024,
+      "threat_score": 43.9,
+      "anomaly_flag": 1,
+      "signals": {
+        "conflict_intensity": 0.152,
+        "total_fatalities": 4,
+        "firms_signal": 63.718194783105126,
+        "gdelt_sentiment": -0.7182793748657128
+      },
+      "event_count": 2,
+      "last_event": "2026-04-26"
+    }
+  ],
+  "GET /hex/{id}": {
+    "cell": {
+      "hex_id": "851e6cb7fffffff",
+      "event_count": 1,
+      "total_fatalities": 8,
+      "conflict_intensity": 0.124,
+      "firms_signal": 80.956572213881,
+      "gdelt_sentiment": -0.5625674963050683,
+      "threat_score": 46.11,
+      "anomaly_flag": 1,
+      "updated_at": "2026-04-17T05:57:43.626323Z"
+    },
+    "recent_events": [
+      {
+        "id": 1577,
+        "source": "acled_sim",
+        "event_date": "2026-03-14",
+        "event_type": "Strategic development",
+        "latitude": 51.072599,
+        "longitude": 33.580763,
+        "fatalities": 8,
+        "sentiment": null,
+        "signal_strength": null
+      }
+    ]
+  },
+  "POST /alert response": {
+    "hex_id": "851e6cb7fffffff",
+    "threat_score": 46.11,
+    "threshold": 60.0,
+    "crossed": false,
+    "alert_type": "none",
+    "created_at": "2026-04-17T06:02:31.309015Z"
+  },
+  "POST /sitrep request": {
+    "hex_id": "851e6cb7fffffff"
+  },
+  "POST /chat request": {
+    "hex_id": "851e6cb7fffffff",
+    "question": "Why is this sector flagged?"
+  }
+}

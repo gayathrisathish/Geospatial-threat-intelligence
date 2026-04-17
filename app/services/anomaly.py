@@ -24,7 +24,7 @@ def compute_anomaly_flags(rows: Iterable[dict]) -> pd.DataFrame:
         return df
 
     model = IsolationForest(
-        contamination=0.15,
+        contamination=0.05,
         random_state=42,
         n_estimators=200,
     )

@@ -1,10 +1,12 @@
 from datetime import datetime, timezone
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.database import get_connection, init_schema
-from app.schemas import AlertRequest, AlertResponse, HexDetailResponse, HexGridResponse
+from app.schemas import AlertResponse, HexDetailResponse, HexGridItem
 from app.services.scoring import classify_alert
 
 app = FastAPI(title="GeoSentinel API", version="0.1.0")
@@ -18,140 +20,220 @@ app.add_middleware(
 )
 
 
+def _internal_error(endpoint: str, error: str) -> JSONResponse:
+    return JSONResponse(status_code=500, content={"error": error, "endpoint": endpoint})
+
+
 @app.on_event("startup")
 def startup() -> None:
     init_schema()
 
 
+@app.get("/")
+def root() -> dict:
+    try:
+        return {
+            "service": "GeoSentinel API",
+            "status": "ok",
+            "docs": "/docs",
+            "health": "/health",
+            "endpoints": ["/hexgrid", "/hex/{hex_id}", "/alert"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _internal_error("/", f"failed to build root response: {exc}")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    try:
+        return Response(status_code=204)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _internal_error("/favicon.ico", f"failed to serve favicon: {exc}")
+
+
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "geosentinel-api"}
+    try:
+        return {"status": "ok", "service": "geosentinel-api"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _internal_error("/health", f"failed to build health response: {exc}")
 
 
-@app.get("/hexgrid", response_model=HexGridResponse)
-def get_hexgrid(min_score: float = 0.0) -> HexGridResponse:
-    with get_connection() as conn:
-        cur = conn.execute(
-            """
-            SELECT
-                hex_id,
-                event_count,
-                total_fatalities,
-                conflict_intensity,
-                firms_signal,
-                gdelt_sentiment,
-                threat_score,
-                anomaly_flag,
-                updated_at
-            FROM hex_cells
-            WHERE threat_score >= ?
-            ORDER BY threat_score DESC
-            """,
-            (min_score,),
-        )
-        rows = [dict(row) for row in cur.fetchall()]
+@app.get("/hexgrid", response_model=list[HexGridItem])
+def get_hexgrid(min_score: float = 0.0) -> list[HexGridItem]:
+    try:
+        with get_connection() as conn:
+            cur = conn.execute(
+                """
+                SELECT
+                    h.hex_id,
+                    ROUND(AVG(e.latitude), 6) AS lat,
+                    ROUND(AVG(e.longitude), 6) AS lng,
+                    h.threat_score,
+                    h.anomaly_flag,
+                    h.conflict_intensity,
+                    h.total_fatalities,
+                    h.firms_signal,
+                    h.gdelt_sentiment,
+                    h.event_count,
+                    MAX(e.event_date) AS last_event
+                FROM hex_cells h
+                LEFT JOIN events e ON e.hex_id = h.hex_id
+                WHERE h.threat_score >= ?
+                GROUP BY
+                    h.hex_id,
+                    h.threat_score,
+                    h.anomaly_flag,
+                    h.conflict_intensity,
+                    h.total_fatalities,
+                    h.firms_signal,
+                    h.gdelt_sentiment,
+                    h.event_count
+                ORDER BY h.threat_score DESC
+                """,
+                (min_score,),
+            )
+            rows = [dict(row) for row in cur.fetchall()]
 
-    return {
-        "generated_at": datetime.now(tz=timezone.utc),
-        "count": len(rows),
-        "items": rows,
-    }
+        return [
+            {
+                "hex_id": row["hex_id"],
+                "lat": row["lat"],
+                "lng": row["lng"],
+                "threat_score": row["threat_score"],
+                "anomaly_flag": row["anomaly_flag"],
+                "signals": {
+                    "conflict_intensity": row["conflict_intensity"],
+                    "total_fatalities": row["total_fatalities"],
+                    "firms_signal": row["firms_signal"],
+                    "gdelt_sentiment": row["gdelt_sentiment"],
+                },
+                "event_count": row["event_count"],
+                "last_event": row["last_event"],
+            }
+            for row in rows
+        ]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _internal_error("/hexgrid", f"failed to fetch hex grid: {exc}")
 
 
 @app.get("/hex/{hex_id}", response_model=HexDetailResponse)
 def get_hex_detail(hex_id: str) -> HexDetailResponse:
-    with get_connection() as conn:
-        cell = conn.execute(
-            """
-            SELECT
-                hex_id,
-                event_count,
-                total_fatalities,
-                conflict_intensity,
-                firms_signal,
-                gdelt_sentiment,
-                threat_score,
-                anomaly_flag,
-                updated_at
-            FROM hex_cells
-            WHERE hex_id = ?
-            """,
-            (hex_id,),
-        ).fetchone()
-        if not cell:
-            raise HTTPException(status_code=404, detail="Hex cell not found")
+    try:
+        with get_connection() as conn:
+            cell = conn.execute(
+                """
+                SELECT
+                    hex_id,
+                    event_count,
+                    total_fatalities,
+                    conflict_intensity,
+                    firms_signal,
+                    gdelt_sentiment,
+                    threat_score,
+                    anomaly_flag,
+                    updated_at
+                FROM hex_cells
+                WHERE hex_id = ?
+                """,
+                (hex_id,),
+            ).fetchone()
+            if not cell:
+                return JSONResponse(status_code=404, content={"error": "hex not found", "hex_id": hex_id})
 
-        events = conn.execute(
-            """
-            SELECT
-                id,
-                source,
-                event_date,
-                event_type,
-                latitude,
-                longitude,
-                fatalities,
-                sentiment,
-                signal_strength
-            FROM events
-            WHERE hex_id = ?
-            ORDER BY event_date DESC
-            LIMIT 25
-            """,
-            (hex_id,),
-        ).fetchall()
+            events = conn.execute(
+                """
+                SELECT
+                    id,
+                    source,
+                    event_date,
+                    event_type,
+                    latitude,
+                    longitude,
+                    fatalities,
+                    sentiment,
+                    signal_strength
+                FROM events
+                WHERE hex_id = ?
+                ORDER BY event_date DESC
+                LIMIT 25
+                """,
+                (hex_id,),
+            ).fetchall()
 
-    return {
-        "cell": dict(cell),
-        "recent_events": [dict(event) for event in events],
-    }
+        return {
+            "cell": dict(cell),
+            "recent_events": [dict(event) for event in events],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _internal_error("/hex/{hex_id}", f"failed to fetch hex detail: {exc}")
 
 
 @app.post("/alert", response_model=AlertResponse)
-def post_alert(body: AlertRequest) -> AlertResponse:
-    now = datetime.now(tz=timezone.utc)
-    with get_connection() as conn:
-        cell = conn.execute(
-            """
-            SELECT threat_score, conflict_intensity, firms_signal, gdelt_sentiment
-            FROM hex_cells
-            WHERE hex_id = ?
-            """,
-            (body.hex_id,),
-        ).fetchone()
-        if not cell:
-            raise HTTPException(status_code=404, detail="Hex cell not found")
+def post_alert(body: dict[str, Any]) -> AlertResponse:
+    try:
+        hex_id = body.get("hex_id") if isinstance(body, dict) else None
+        if not hex_id:
+            return JSONResponse(status_code=422, content={"error": "hex_id is required"})
 
-        threat_score = float(cell["threat_score"])
-        crossed = threat_score >= body.threshold
-        alert_type = classify_alert(
-            conflict_intensity=float(cell["conflict_intensity"]),
-            firms_signal=float(cell["firms_signal"]),
-            gdelt_sentiment=float(cell["gdelt_sentiment"]),
-        )
-        if not crossed:
-            alert_type = "none"
+        threshold = float(body.get("threshold", 60.0))
+        now = datetime.now(tz=timezone.utc)
+        with get_connection() as conn:
+            cell = conn.execute(
+                """
+                SELECT threat_score, conflict_intensity, firms_signal, gdelt_sentiment
+                FROM hex_cells
+                WHERE hex_id = ?
+                """,
+                (hex_id,),
+            ).fetchone()
+            if not cell:
+                return JSONResponse(status_code=404, content={"error": "hex not found", "hex_id": hex_id})
 
-        conn.execute(
-            """
-            INSERT INTO alerts (hex_id, threat_score, threshold, alert_type, created_at, details)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                body.hex_id,
-                threat_score,
-                body.threshold,
-                alert_type,
-                now.isoformat(),
-                "auto-generated from /alert endpoint",
-            ),
-        )
+            threat_score = float(cell["threat_score"])
+            crossed = threat_score >= threshold
+            alert_type = classify_alert(
+                conflict_intensity=float(cell["conflict_intensity"]),
+                firms_signal=float(cell["firms_signal"]),
+                gdelt_sentiment=float(cell["gdelt_sentiment"]),
+            )
+            if not crossed:
+                alert_type = "none"
 
-    return {
-        "hex_id": body.hex_id,
-        "threat_score": threat_score,
-        "threshold": body.threshold,
-        "crossed": crossed,
-        "alert_type": alert_type,
-        "created_at": now,
-    }
+            conn.execute(
+                """
+                INSERT INTO alerts (hex_id, threat_score, threshold, alert_type, created_at, details)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    hex_id,
+                    threat_score,
+                    threshold,
+                    alert_type,
+                    now.isoformat(),
+                    "auto-generated from /alert endpoint",
+                ),
+            )
+
+        return {
+            "hex_id": hex_id,
+            "threat_score": threat_score,
+            "threshold": threshold,
+            "crossed": crossed,
+            "alert_type": alert_type,
+            "created_at": now,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        return _internal_error("/alert", f"failed to process alert request: {exc}")

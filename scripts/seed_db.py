@@ -1,6 +1,7 @@
 import argparse
 import json
 import random
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,16 +11,16 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.config import H3_RESOLUTION
+from app.config import DB_PATH, H3_RESOLUTION
 from app.database import get_connection, init_schema
 from app.services.anomaly import compute_anomaly_flags
 from app.services.scoring import HexSignals, compute_conflict_intensity, compute_threat_score
 
 
-MANIPUR_LAT_MIN = 23.8
-MANIPUR_LAT_MAX = 25.7
-MANIPUR_LNG_MIN = 93.0
-MANIPUR_LNG_MAX = 94.8
+MANIPUR_LAT_MIN = 37.27
+MANIPUR_LAT_MAX = 53.83
+MANIPUR_LNG_MIN = 4.58
+MANIPUR_LNG_MAX = 81.97
 
 
 def _parse_args() -> argparse.Namespace:
@@ -31,7 +32,45 @@ def _parse_args() -> argparse.Namespace:
         help="Path to ACLED CSV file. Falls back to generated demo events when missing.",
     )
     parser.add_argument("--rows", type=int, default=250, help="Synthetic event rows if ACLED is absent")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Skip confirmation prompt before wiping existing database rows.",
+    )
     return parser.parse_args()
+
+
+def run_signal_generators() -> None:
+    root_dir = Path(__file__).resolve().parents[1]
+    synthetic_script = root_dir / "backend" / "synthetic.py"
+    if not synthetic_script.exists():
+        raise FileNotFoundError(f"Required synthetic generator not found: {synthetic_script}")
+
+    print(f"Running synthetic generator: {synthetic_script}")
+    subprocess.run([sys.executable, "synthetic.py"], cwd=synthetic_script.parent, check=True)
+
+
+def confirm_wipe(force: bool) -> bool:
+    geosignal_path = DB_PATH.with_name("geosignal.db")
+    existing_db_names = [p.name for p in (DB_PATH, geosignal_path) if p.exists()]
+    if not existing_db_names:
+        return True
+
+    warning = (
+        "Warning: existing DB file(s) "
+        f"{', '.join(existing_db_names)} detected; seed will wipe events/hex_cells/alerts in {DB_PATH.name}."
+    )
+    if force:
+        print(f"{warning} Proceeding due to --force.")
+        return True
+
+    print(warning)
+    answer = input("Continue? [y/N]: ").strip().lower()
+    if answer in {"y", "yes"}:
+        return True
+
+    print("Seed aborted; database left unchanged.")
+    return False
 
 
 def load_or_generate_events(acled_path: Path, row_count: int) -> pd.DataFrame:
@@ -90,9 +129,14 @@ def load_or_generate_events(acled_path: Path, row_count: int) -> pd.DataFrame:
 
 def add_hex_ids(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-    out["hex_id"] = out.apply(
-        lambda r: h3.latlng_to_cell(float(r["latitude"]), float(r["longitude"]), H3_RESOLUTION), axis=1
-    )
+    hex_ids = []
+    for _, row in out.iterrows():
+        try:
+            hex_id = h3.latlng_to_cell(float(row["latitude"]), float(row["longitude"]), H3_RESOLUTION)
+            hex_ids.append(hex_id)
+        except (ValueError, TypeError):
+            hex_ids.append(None)
+    out["hex_id"] = hex_ids
     return out
 
 
@@ -114,24 +158,26 @@ def build_hex_metrics(events_df: pd.DataFrame) -> pd.DataFrame:
         ),
     )
 
-    grouped = grouped.assign(
-        conflict_intensity=grouped.apply(
-            lambda r: compute_conflict_intensity(int(r["event_count"]), int(r["total_fatalities"])), axis=1
+    # Compute conflict_intensity
+    conflict_intensities = []
+    for _, row in grouped.iterrows():
+        ci = compute_conflict_intensity(int(row["event_count"]), int(row["total_fatalities"]))
+        conflict_intensities.append(ci)
+    grouped["conflict_intensity"] = conflict_intensities
+
+    # Compute threat_score
+    threat_scores = []
+    for _, row in grouped.iterrows():
+        ts = compute_threat_score(
+            HexSignals(
+                event_count=int(row["event_count"]),
+                total_fatalities=int(row["total_fatalities"]),
+                firms_signal=float(row["firms_signal"]),
+                gdelt_sentiment=float(row["gdelt_sentiment"]),
+            )
         )
-    )
-    grouped = grouped.assign(
-        threat_score=grouped.apply(
-            lambda r: compute_threat_score(
-                HexSignals(
-                    event_count=int(r["event_count"]),
-                    total_fatalities=int(r["total_fatalities"]),
-                    firms_signal=float(r["firms_signal"]),
-                    gdelt_sentiment=float(r["gdelt_sentiment"]),
-                )
-            ),
-            axis=1,
-        )
-    )
+        threat_scores.append(ts)
+    grouped["threat_score"] = threat_scores
 
     with_flags = compute_anomaly_flags(grouped.to_dict(orient="records"))
     with_flags["updated_at"] = datetime.now(tz=timezone.utc).isoformat()
@@ -222,6 +268,13 @@ def persist(events_df: pd.DataFrame, metrics_df: pd.DataFrame) -> None:
 
 def main() -> None:
     args = _parse_args()
+    if not confirm_wipe(args.force):
+        return
+
+    # 1) Generate offline FIRMS + GDELT simulation CSVs.
+    run_signal_generators()
+
+    # 2) Initialize schema and continue ingestion/scoring pipeline.
     init_schema()
 
     events = load_or_generate_events(Path(args.acled), args.rows)
