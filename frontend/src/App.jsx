@@ -4,6 +4,7 @@ import SidePanel from './components/SidePanel.jsx';
 import SitrepModal from './components/SitrepModal.jsx';
 import ChatPanel from './components/ChatPanel.jsx';
 import AlertFeed from './components/AlertFeed.jsx';
+import AlertModal from './components/AlertModal.jsx';
 import Navbar from './components/Navbar.jsx';
 import { fetchHexGrid, fetchHexDetail, postAlert, generateSitrep } from './api.js';
 
@@ -19,6 +20,7 @@ export default function App() {
   const [alerts, setAlerts] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [showAlertModal, setShowAlertModal] = useState(false);
 
   // Load hex grid on mount
   useEffect(() => {
@@ -129,6 +131,14 @@ export default function App() {
           </p>
           <div className="flex flex-wrap gap-2">
             <button
+              onClick={() => setShowAlertModal(true)}
+              disabled={!alerts.length}
+              className="px-3 py-2 rounded-md bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-wide transition-colors flex items-center gap-1.5"
+            >
+              <span>🔔</span>
+              Alerts ({alerts.length})
+            </button>
+            <button
               onClick={handleJumpToHotspot}
               disabled={!hexCells.length}
               className="px-3 py-2 rounded-md bg-red-700 hover:bg-red-800 disabled:opacity-50 text-white text-xs font-semibold uppercase tracking-wide transition-colors"
@@ -162,23 +172,14 @@ export default function App() {
           />
         </div>
 
-        <div className="min-h-0 grid grid-rows-[minmax(420px,52%)_minmax(0,1fr)] 2xl:grid-rows-[minmax(380px,46%)_minmax(0,1fr)] bg-slate-50">
-          <AlertFeed
-            alerts={alerts}
-            onAlertClick={handleAlertClick}
-            isLoading={isLoading}
-            mapHighRiskCount={mapHighRiskCount}
+        <div className="min-h-0 bg-slate-50">
+          <SidePanel
+            selectedHex={selectedHex}
+            hexDetail={hexDetail}
+            hexCells={hexCells}
+            onGenerateSitrep={handleGenerateSitrep}
+            onOpenChat={() => setShowChat(true)}
           />
-
-          <div className="min-h-0 overflow-hidden">
-            <SidePanel
-              selectedHex={selectedHex}
-              hexDetail={hexDetail}
-              hexCells={hexCells}
-              onGenerateSitrep={handleGenerateSitrep}
-              onOpenChat={() => setShowChat(true)}
-            />
-          </div>
         </div>
       </div>
 
@@ -193,6 +194,15 @@ export default function App() {
         error={sitrepError}
         onClearDraftSections={handleClearSitrepDraftSections}
         onClose={() => setShowSitrep(false)}
+      />
+
+      <AlertModal
+        isOpen={showAlertModal}
+        alerts={alerts}
+        onAlertClick={handleAlertClick}
+        onClose={() => setShowAlertModal(false)}
+        isLoading={isLoading}
+        mapHighRiskCount={mapHighRiskCount}
       />
 
       <ChatPanel
