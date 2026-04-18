@@ -1,196 +1,278 @@
-import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Polygon, Tooltip, Circle, useMap } from 'react-leaflet';
+import { useRef, useState, useEffect, useMemo } from 'react';
+import Globe from 'react-globe.gl';
 import { cellToBoundary } from 'h3-js';
-import { severityBucket, threatColor, threatPlainLabel } from '../utils/colorScale.js';
-import { formatHexId, formatScore } from '../utils/formatters.js';
-import { generateForecastForHex, generatePropagationFrames } from '../services/forecast.js';
-import ForecastLegend from './ForecastLegend.jsx';
+import * as THREE from 'three';
 
-function FitToHexCells({ hexCells }) {
-  const map = useMap();
+const MAX_POLYGONS = 300;
 
-  useEffect(() => {
-    if (!hexCells?.length) return;
-
-    const bounds = hexCells
-      .filter((cell) => Number.isFinite(cell.lat) && Number.isFinite(cell.lng))
-      .map((cell) => [cell.lat, cell.lng]);
-
-    if (!bounds.length) return;
-    map.fitBounds(bounds, { padding: [24, 24], maxZoom: 9 });
-  }, [map, hexCells]);
-
-  return null;
+function getSignedRingArea(ring) {
+  let area = 0;
+  for (let i = 0; i < ring.length - 1; i += 1) {
+    const [x1, y1] = ring[i];
+    const [x2, y2] = ring[i + 1];
+    area += x1 * y2 - x2 * y1;
+  }
+  return area / 2;
 }
 
-/**
- * Propagation Visualization Layer
- * Shows circles and halos around selected hex to visualize threat spread
- */
-function PropagationOverlay({ selectedHex, hexCells }) {
-  const [forecast, setForecast] = useState(null);
+function toGeoJsonRing(hexId) {
+  const ring = cellToBoundary(hexId).map(([lat, lng]) => [lng, lat]);
 
-  useEffect(() => {
-    if (!selectedHex || !hexCells) {
-      setForecast(null);
-      return;
-    }
+  // Close the ring explicitly for GeoJSON consumers.
+  if (ring.length > 0) {
+    ring.push(ring[0]);
+  }
 
-    const data = generateForecastForHex(selectedHex.hex_id, hexCells);
-    setForecast(data);
-  }, [selectedHex, hexCells]);
+  // Enforce clockwise winding for outer rings used by globe polygon triangulation.
+  if (getSignedRingArea(ring) > 0) {
+    ring.reverse();
+  }
 
-  if (!forecast) return null;
+  return ring;
+}
 
-  // Create concentric circles showing threat spread zones
-  const ringRadii = [50, 100, 150]; // km
-  const ringOpacities = [0.3, 0.2, 0.1];
+function scoreColor(score, alpha = 0.9) {
+  if (score >= 75) return `rgba(239,68,68,${alpha})`;
+  if (score >= 50) return `rgba(249,115,22,${alpha})`;
+  if (score >= 25) return `rgba(234,179,8,${alpha})`;
+  return `rgba(34,197,94,${alpha})`;
+}
 
-  return (
-    <>
-      {/* Propagation rings */}
-      {ringRadii.map((radius, idx) => (
-        <Circle
-          key={`ring-${idx}`}
-          center={[selectedHex.lat, selectedHex.lng]}
-          radius={radius * 1000} // Convert km to meters for Leaflet
-          pathOptions={{
-            fillColor: '#0891b2', // cyan
-            fillOpacity: ringOpacities[idx],
-            color: '#0891b2',
-            weight: 1,
-            dashArray: '5, 5',
-            lineCap: 'round',
-          }}
-        />
-      ))}
+export default function MapView({ hexCells, selectedHex, onHexClick }) {
+  const globeRef = useRef();
+  const containerRef = useRef(null);
+  const [globeReady, setGlobeReady] = useState(false);
+  const [dimensions, setDimensions] = useState({
+    width:
+      typeof window !== 'undefined' ? Math.floor(window.innerWidth * 0.65) : 800,
+    height: typeof window !== 'undefined' ? window.innerHeight : 600,
+  });
 
-      {/* Central glow for selected hex */}
-      <Circle
-        center={[selectedHex.lat, selectedHex.lng]}
-        radius={15000} // 15 km glow radius
-        pathOptions={{
-          fillColor: threatColor(forecast.current_score),
-          fillOpacity: 0.15,
-          color: 'transparent',
-          weight: 0,
-        }}
-      />
-    </>
+  const cappedHexCells = useMemo(() => {
+    if (!Array.isArray(hexCells)) return [];
+    return hexCells.slice(0, MAX_POLYGONS);
+  }, [hexCells]);
+
+  // Memoize expensive h3 boundary calculations so they only run when hex input changes.
+  const polygonData = useMemo(
+    () =>
+      cappedHexCells.map((cell) => ({
+        ...cell,
+        geoJson: {
+          type: 'Polygon',
+          coordinates: [toGeoJsonRing(cell.hex_id)],
+        },
+      })),
+    [cappedHexCells]
   );
-}
-
-export default function MapView({ hexCells, selectedHex, onHexClick, isLoading }) {
-  const [forecastFrames, setForecastFrames] = useState([]);
 
   useEffect(() => {
-    if (!selectedHex || !hexCells) {
-      setForecastFrames([]);
-      return;
-    }
-    const frames = generatePropagationFrames(selectedHex.hex_id, hexCells);
-    setForecastFrames(frames);
-  }, [selectedHex, hexCells]);
+    if (!containerRef.current || typeof ResizeObserver === 'undefined') return undefined;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry?.contentRect) return;
+      setDimensions({
+        width: Math.max(1, Math.floor(entry.contentRect.width)),
+        height: Math.max(1, Math.floor(entry.contentRect.height)),
+      });
+    });
+
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const initialFlyTimer = setTimeout(() => {
+      globeRef.current?.pointOfView({ lat: 48, lng: 35, altitude: 2.5 }, 1000);
+    }, 600);
+
+    return () => {
+      clearTimeout(initialFlyTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!globeReady || !globeRef.current) return undefined;
+
+    const controls = globeRef.current.controls();
+    if (!controls) return undefined;
+
+    controls.minDistance = 70;
+    controls.maxDistance = 800;
+    controls.zoomSpeed = 1.2;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.enableRotate = true;
+    controls.enableZoom = true;
+    controls.enablePan = false;
+    controls.autoRotate = false;
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.PAN,
+    };
+    controls.touches = {
+      ONE: THREE.TOUCH.ROTATE,
+      TWO: THREE.TOUCH.DOLLY_PAN,
+    };
+
+    return undefined;
+  }, [globeReady]);
 
   return (
-    <div className="w-full h-full relative">
-      {isLoading && (
-        <div className="absolute inset-0 z-[1200] bg-slate-100/80 flex items-center justify-center">
-          <div className="text-sm text-slate-700 font-semibold">Loading sectors...</div>
-        </div>
-      )}
-
-      <MapContainer
-        center={[24.8, 93.9]}
-        zoom={7}
-        style={{ width: '100%', height: '100%' }}
-        attributionControl={false}
-      >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; CartoDB contributors'
-        />
-        <FitToHexCells hexCells={hexCells} />
-        <PropagationOverlay selectedHex={selectedHex} hexCells={hexCells} />
-
-        {hexCells.map((cell) => {
-          const boundary = cellToBoundary(cell.hex_id);
-          // h3-js returns [lat, lng] pairs, Leaflet expects [lat, lng]
-          const positions = boundary;
-
-          const isSelected = cell.hex_id === selectedHex?.hex_id;
-          const isAnomaly = cell.anomaly_flag === 1;
-
-          let borderColor = 'transparent';
-          let borderWeight = 0;
-          let borderDashArray = undefined;
-
-          if (isSelected) {
-            borderColor = '#0f172a';
-            borderWeight = 3.2;
-          } else if (isAnomaly) {
-            borderColor = '#334155';
-            borderWeight = 1.8;
-            borderDashArray = '4';
-          }
-
-          const riskLabel = threatPlainLabel(cell.threat_score);
-          const severity = severityBucket(cell.threat_score);
-          const tooltipSummary =
-            severity === 'high'
-              ? 'Immediate monitoring recommended.'
-              : severity === 'medium'
-              ? 'Watch for escalation signals.'
-              : 'Stable sector with low immediate concern.';
-
-          return (
-            <Polygon
-              key={cell.hex_id}
-              positions={positions}
-              fillColor={threatColor(cell.threat_score)}
-              fillOpacity={0.58}
-              color={borderColor}
-              weight={borderWeight}
-              dashArray={borderDashArray}
-              interactive={true}
-              eventHandlers={{
-                click: () => onHexClick(cell),
-              }}
-            >
-              <Tooltip direction="center" permanent={false} offset={[0, 0]}>
-                <div className="text-xs leading-snug">
-                  <div className="font-semibold text-slate-900">{formatHexId(cell.hex_id)}</div>
-                  <div className="text-slate-700">{riskLabel} (Score {formatScore(cell.threat_score)})</div>
-                  <div className="text-slate-500">{tooltipSummary}</div>
-                </div>
-              </Tooltip>
-            </Polygon>
-          );
-        })}
-
-        {selectedHex && (
-          <Circle
-            center={[selectedHex.lat, selectedHex.lng]}
-            radius={7000}
-            pathOptions={{
-              fillOpacity: 0,
-              color: '#0f172a',
-              weight: 2,
+    <div
+      ref={containerRef}
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        background: '#dbeafe',
+        touchAction: 'none',
+      }}
+    >
+      {!globeReady && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10,
+            background: 'linear-gradient(180deg, #dbeafe 0%, #bfdbfe 100%)',
+            fontFamily: 'monospace',
+            color: '#0369a1',
+            fontSize: '13px',
+            letterSpacing: '0.15em',
+          }}
+        >
+          <div
+            style={{
+              width: 40,
+              height: 40,
+              border: '2px solid #0ea5e9',
+              borderTopColor: 'transparent',
+              borderRadius: '50%',
+              animation: 'spin 1s linear infinite',
+              marginBottom: 16,
             }}
           />
-        )}
-      </MapContainer>
-
-      {selectedHex && (
-        <div className="absolute top-4 left-4 z-[450] bg-white border border-slate-300 rounded-md px-3 py-2 shadow text-xs text-slate-700">
-          <div className="uppercase tracking-wide text-[10px] text-slate-500">Pinned sector</div>
-          <div className="font-semibold text-slate-900">{formatHexId(selectedHex.hex_id)}</div>
-          <div>{threatPlainLabel(selectedHex.threat_score)}</div>
+          INITIALISING GLOBE...
+          <style>{'@keyframes spin{to{transform:rotate(360deg)}}'}</style>
         </div>
       )}
 
-      {/* Forecast Legend */}
-      {selectedHex && <ForecastLegend />}
+      <Globe
+        ref={globeRef}
+        enablePointerInteraction={true}
+        width={dimensions.width}
+        height={dimensions.height}
+        globeImageUrl="https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+        backgroundColor="#dbeafe"
+        atmosphereColor="#93c5fd"
+        atmosphereAltitude={0.12}
+        polygonsData={polygonData}
+        polygonGeoJsonGeometry={(d) => d.geoJson}
+        polygonAltitude={(d) => {
+          const base = d.threat_score / 60000;
+          const anomalyBoost = d.anomaly_flag === 1 ? 2 : 1;
+          const selectedBoost = d.hex_id === selectedHex?.hex_id ? 2.4 : 1;
+          return base * anomalyBoost * selectedBoost;
+        }}
+        polygonCapColor={(d) =>
+          d.hex_id === selectedHex?.hex_id ? scoreColor(d.threat_score, 0.35) : 'rgba(255,255,255,0.04)'
+        }
+        polygonSideColor={() => 'rgba(255,255,255,0.02)'}
+        polygonStrokeColor={(d) =>
+          d.hex_id === selectedHex?.hex_id
+            ? '#ffffff'
+            : d.anomaly_flag === 1
+            ? scoreColor(d.threat_score, 0.85)
+            : 'rgba(15,23,42,0.08)'
+        }
+        labelsData={cappedHexCells}
+        labelLat={(d) => d.lat}
+        labelLng={(d) => d.lng}
+        labelText={() => ''}
+        labelAltitude={(d) =>
+          d.hex_id === selectedHex?.hex_id ? 0.01 : d.anomaly_flag === 1 ? 0.006 : 0.003
+        }
+        labelIncludeDot={true}
+        labelDotRadius={(d) => {
+          const base = 0.04 + d.threat_score / 6000;
+          const anomalyBoost = d.anomaly_flag === 1 ? 1.2 : 1;
+          const selectedBoost = d.hex_id === selectedHex?.hex_id ? 1.35 : 1;
+          return base * anomalyBoost * selectedBoost;
+        }}
+        labelColor={(d) => scoreColor(d.threat_score, 0.95)}
+        labelsTransitionDuration={250}
+        polygonLabel={(d) => `
+          <div style="
+            background:#f8fafc;
+            border:1px solid #cbd5e1;
+            padding:6px 10px;
+            border-radius:4px;
+            font-family:monospace;
+            font-size:12px;
+            color:#0f172a;
+          ">
+            <div style="color:#64748b;font-size:10px">SECTOR</div>
+            <div>${d.hex_id.slice(-4).toUpperCase()}</div>
+            <div style="color:${
+              d.threat_score >= 75
+                ? '#ef4444'
+                : d.threat_score >= 50
+                ? '#f97316'
+                : d.threat_score >= 25
+                ? '#eab308'
+                : '#22c55e'
+            };font-size:16px;font-weight:bold">
+              ${d.threat_score.toFixed(0)}
+            </div>
+            <div style="color:#64748b;font-size:10px">THREAT SCORE</div>
+            ${d.anomaly_flag ? '<div style="color:#ef4444;margin-top:4px">ANOMALY</div>' : ''}
+          </div>
+        `}
+        labelLabel={(d) => `
+          <div style="
+            background:#f8fafc;
+            border:1px solid #cbd5e1;
+            padding:6px 10px;
+            border-radius:4px;
+            font-family:monospace;
+            font-size:12px;
+            color:#0f172a;
+          ">
+            <div style="color:#64748b;font-size:10px">SECTOR</div>
+            <div>${d.hex_id.slice(-4).toUpperCase()}</div>
+            <div style="color:${
+              d.threat_score >= 75
+                ? '#ef4444'
+                : d.threat_score >= 50
+                ? '#f97316'
+                : d.threat_score >= 25
+                ? '#eab308'
+                : '#22c55e'
+            };font-size:16px;font-weight:bold">
+              ${d.threat_score.toFixed(0)}
+            </div>
+            <div style="color:#64748b;font-size:10px">THREAT SCORE</div>
+            ${d.anomaly_flag ? '<div style="color:#ef4444;margin-top:4px">ANOMALY</div>' : ''}
+          </div>
+        `}
+        onPolygonClick={(d) => {
+          globeRef.current?.pointOfView({ lat: d.lat, lng: d.lng, altitude: 1.2 }, 800);
+          onHexClick(d);
+        }}
+        onLabelClick={(d) => {
+          globeRef.current?.pointOfView({ lat: d.lat, lng: d.lng, altitude: 0.72 }, 900);
+          onHexClick(d);
+        }}
+        polygonsTransitionDuration={300}
+        onGlobeReady={() => setGlobeReady(true)}
+      />
     </div>
   );
 }
