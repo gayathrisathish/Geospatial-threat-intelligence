@@ -1,8 +1,35 @@
+import { useEffect, useState } from 'react';
 import { threatColor, threatLabel, threatPlainLabel } from '../utils/colorScale.js';
 import { formatHexId, formatScore, formatSignal, formatDate, formatRiskDriver } from '../utils/formatters.js';
+import { getPlaceName } from '../utils/geocoder.js';
 import ForecastPanel from './ForecastPanel.jsx';
 
 export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, onOpenChat, hexCells }) {
+  const [placeName, setPlaceName] = useState('');
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPlaceName = async () => {
+      if (selectedHex?.lat == null || selectedHex?.lng == null) {
+        setPlaceName('');
+        return;
+      }
+
+      setPlaceName('');
+      const resolved = await getPlaceName(selectedHex.lat, selectedHex.lng);
+      if (active) {
+        setPlaceName(resolved);
+      }
+    };
+
+    loadPlaceName();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedHex?.hex_id, selectedHex?.lat, selectedHex?.lng]);
+
   if (!selectedHex) {
     return (
       <div className="flex flex-col items-center justify-center h-full bg-slate-50 text-slate-500 p-8">
@@ -65,6 +92,9 @@ export default function SidePanel({ selectedHex, hexDetail, onGenerateSitrep, on
             </div>
             <div className="text-sm font-semibold text-slate-900">
               {formatHexId(selectedHex.hex_id)}
+            </div>
+            <div className="text-xs text-gray-400 tracking-widest mt-1 font-data">
+              📍 {placeName || 'Locating...'}
             </div>
           </div>
           <span

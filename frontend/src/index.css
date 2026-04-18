@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --gs-background: #0a0d14;
+  --gs-panel: #111827;
+  --gs-border: #1f2937;
+  --gs-accent-green: #00ff88;
+  --gs-accent-amber: #fbbf24;
+  --gs-accent-red: #ef4444;
+  --gs-muted: #4b5563;
+  --gs-terminal-green: #22c55e;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -9,14 +20,60 @@
 }
 
 body {
-  background-color: #f1f5f9;
-  color: #0f172a;
+  background-color: var(--gs-background);
+  color: #e5e7eb;
   font-family: system-ui, -apple-system, sans-serif;
 }
 
 html, body, #root {
   width: 100%;
   height: 100%;
+}
+
+h1, h2, h3, h4, h5, h6,
+nav,
+.font-ui,
+.ui-label,
+.ui-header {
+  font-family: 'Rajdhani', system-ui, sans-serif;
+}
+
+.font-data,
+.terminal-text,
+.font-mono,
+code,
+pre {
+  font-family: 'Share Tech Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.gs-shell {
+  background: var(--gs-background);
+  color: #e5e7eb;
+}
+
+.gs-panel {
+  background: var(--gs-panel);
+  border-color: var(--gs-border);
+}
+
+.gs-muted {
+  color: var(--gs-muted);
+}
+
+.gs-accent-green {
+  color: var(--gs-accent-green);
+}
+
+.gs-accent-amber {
+  color: var(--gs-accent-amber);
+}
+
+.gs-accent-red {
+  color: var(--gs-accent-red);
+}
+
+.gs-terminal-green {
+  color: var(--gs-terminal-green);
 }
 
 /* Pulsing anomaly dot animation */
@@ -31,6 +88,23 @@ html, body, #root {
 
 .pulse-dot {
   animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-alert {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55);
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 0.86;
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+}
+
+.signal-dot-pulse {
+  animation: pulse-alert 1.4s ease-out infinite;
 }
 
 /* Terminal-like glow effect for SITREP */
@@ -105,4 +179,135 @@ html, body, #root {
 
 .leaflet-tooltip-bottom::before {
   border-bottom-color: #ffffff;
+}
+
+@keyframes ops-ticker-scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.ops-ticker-track {
+  width: max-content;
+  animation: ops-ticker-scroll 42s linear infinite;
+  will-change: transform;
+}
+
+.ops-ticker-track:hover {
+  animation-play-state: paused;
+}
+
+@keyframes terminal-caret {
+  0%, 49% {
+    opacity: 1;
+  }
+  50%, 100% {
+    opacity: 0;
+  }
+}
+
+@keyframes terminal-line-appear {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.terminal-cursor {
+  display: inline-block;
+  margin-left: 3px;
+  animation: terminal-caret 1s step-end infinite;
+}
+
+.terminal-line-fade {
+  animation: terminal-line-appear 220ms ease-out;
+}
+
+@keyframes alert-vertical-scroll {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-50%);
+  }
+}
+
+@keyframes alert-entry {
+  0% {
+    opacity: 0;
+    transform: translateY(-12px);
+    box-shadow: 0 0 0 rgba(248, 113, 113, 0);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(0);
+    box-shadow: 0 0 22px rgba(248, 113, 113, 0.22);
+  }
+  100% {
+    box-shadow: 0 0 0 rgba(248, 113, 113, 0);
+  }
+}
+
+@keyframes anomaly-pulse-bg {
+  0%, 100% {
+    background-color: rgba(127, 29, 29, 0.28);
+  }
+  50% {
+    background-color: rgba(153, 27, 27, 0.42);
+  }
+}
+
+.alert-vertical-track {
+  width: 100%;
+  animation: alert-vertical-scroll 22s linear infinite;
+  will-change: transform;
+}
+
+.alert-vertical-track:hover {
+  animation-play-state: paused;
+}
+
+.alert-entry-flash {
+  animation: alert-entry 700ms ease-out;
+}
+
+.alert-anomaly-pulse {
+  animation: anomaly-pulse-bg 1.9s ease-in-out infinite;
+}
+
+@keyframes hint-fade-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@keyframes hint-fade-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+.map-hint-enter {
+  animation: hint-fade-in 260ms ease-out;
+}
+
+.map-hint-exit {
+  animation: hint-fade-out 320ms ease-in forwards;
 }

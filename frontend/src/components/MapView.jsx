@@ -2,6 +2,7 @@ import { useRef, useState, useEffect, useMemo } from 'react';
 import Globe from 'react-globe.gl';
 import { cellToBoundary } from 'h3-js';
 import * as THREE from 'three';
+import HexLegend from './HexLegend.jsx';
 
 const MAX_POLYGONS = 300;
 
@@ -18,12 +19,10 @@ function getSignedRingArea(ring) {
 function toGeoJsonRing(hexId) {
   const ring = cellToBoundary(hexId).map(([lat, lng]) => [lng, lat]);
 
-  // Close the ring explicitly for GeoJSON consumers.
   if (ring.length > 0) {
     ring.push(ring[0]);
   }
 
-  // Enforce clockwise winding for outer rings used by globe polygon triangulation.
   if (getSignedRingArea(ring) > 0) {
     ring.reverse();
   }
@@ -38,10 +37,12 @@ function scoreColor(score, alpha = 0.9) {
   return `rgba(34,197,94,${alpha})`;
 }
 
-export default function MapView({ hexCells, selectedHex, onHexClick }) {
+export default function MapView({ hexCells, selectedHex, onHexClick, onSwitchToMap }) {
   const globeRef = useRef();
   const containerRef = useRef(null);
+  const hasAnimatedInRef = useRef(false);
   const [globeReady, setGlobeReady] = useState(false);
+  const [altitudeIntroProgress, setAltitudeIntroProgress] = useState(0);
   const [dimensions, setDimensions] = useState({
     width:
       typeof window !== 'undefined' ? Math.floor(window.innerWidth * 0.65) : 800,
@@ -53,7 +54,6 @@ export default function MapView({ hexCells, selectedHex, onHexClick }) {
     return hexCells.slice(0, MAX_POLYGONS);
   }, [hexCells]);
 
-  // Memoize expensive h3 boundary calculations so they only run when hex input changes.
   const polygonData = useMemo(
     () =>
       cappedHexCells.map((cell) => ({
@@ -65,6 +65,80 @@ export default function MapView({ hexCells, selectedHex, onHexClick }) {
       })),
     [cappedHexCells]
   );
+
+  const threatRingData = useMemo(() => {
+    const dangerousCells = cappedHexCells
+      .filter((cell) => cell.threat_score >= 50)
+      .sort((a, b) => b.threat_score - a.threat_score)
+      .slice(0, 18);
+
+    const ringOffsets = [0, 380];
+
+    return dangerousCells.flatMap((cell) => {
+      const isCritical = cell.threat_score >= 75;
+      const baseRadius = isCritical ? 1.35 : 1.0;
+      const basePeriod = isCritical ? 1300 : 1550;
+      const speed = isCritical ? 0.7 : 0.55;
+
+      return ringOffsets.map((phase) => ({
+        id: `${cell.hex_id}-${phase}`,
+        lat: cell.lat,
+        lng: cell.lng,
+        maxRadius: baseRadius,
+        propagationSpeed: speed,
+        repeatPeriod: basePeriod + phase,
+        color: isCritical
+          ? ['rgba(239,68,68,0.9)', 'rgba(239,68,68,0.0)']
+          : ['rgba(249,115,22,0.85)', 'rgba(249,115,22,0.0)'],
+      }));
+    });
+  }, [cappedHexCells]);
+
+  const arcConnections = useMemo(() => {
+    const anomalyCells = cappedHexCells
+      .filter((cell) => cell.anomaly_flag === 1)
+      .sort((a, b) => b.threat_score - a.threat_score)
+      .slice(0, 14);
+
+    const toRadians = (value) => (value * Math.PI) / 180;
+    const haversineKm = (a, b) => {
+      const earthRadiusKm = 6371;
+      const dLat = toRadians(b.lat - a.lat);
+      const dLng = toRadians(b.lng - a.lng);
+      const sinLat = Math.sin(dLat / 2);
+      const sinLng = Math.sin(dLng / 2);
+      const factor =
+        sinLat * sinLat +
+        Math.cos(toRadians(a.lat)) * Math.cos(toRadians(b.lat)) * sinLng * sinLng;
+      return earthRadiusKm * 2 * Math.atan2(Math.sqrt(factor), Math.sqrt(1 - factor));
+    };
+
+    const links = [];
+    for (let i = 0; i < anomalyCells.length; i += 1) {
+      for (let j = i + 1; j < anomalyCells.length; j += 1) {
+        const source = anomalyCells[i];
+        const target = anomalyCells[j];
+        const distanceKm = haversineKm(source, target);
+
+        if (distanceKm > 180) continue;
+
+        const severity = Math.max(source.threat_score, target.threat_score);
+        links.push({
+          id: `${source.hex_id}->${target.hex_id}`,
+          startLat: source.lat,
+          startLng: source.lng,
+          endLat: target.lat,
+          endLng: target.lng,
+          severity,
+          distanceKm,
+        });
+      }
+    }
+
+    return links
+      .sort((a, b) => b.severity - a.severity || a.distanceKm - b.distanceKm)
+      .slice(0, 14);
+  }, [cappedHexCells]);
 
   useEffect(() => {
     if (!containerRef.current || typeof ResizeObserver === 'undefined') return undefined;
@@ -84,19 +158,77 @@ export default function MapView({ hexCells, selectedHex, onHexClick }) {
 
   useEffect(() => {
     const initialFlyTimer = setTimeout(() => {
+      if (selectedHex?.lat != null && selectedHex?.lng != null) {
+        globeRef.current?.pointOfView(
+          { lat: selectedHex.lat, lng: selectedHex.lng, altitude: 1.15 },
+          1000
+        );
+        return;
+      }
+
       globeRef.current?.pointOfView({ lat: 48, lng: 35, altitude: 2.5 }, 1000);
     }, 600);
 
     return () => {
       clearTimeout(initialFlyTimer);
     };
-  }, []);
+  }, [selectedHex]);
+
+  useEffect(() => {
+    if (!globeReady || !globeRef.current) return;
+    if (selectedHex?.lat == null || selectedHex?.lng == null) return;
+
+    globeRef.current.pointOfView(
+      { lat: selectedHex.lat, lng: selectedHex.lng, altitude: 1.15 },
+      1000
+    );
+  }, [globeReady, selectedHex]);
+
+  useEffect(() => {
+    if (hasAnimatedInRef.current || polygonData.length === 0) {
+      if (polygonData.length > 0) {
+        setAltitudeIntroProgress(1);
+      }
+      return undefined;
+    }
+
+    hasAnimatedInRef.current = true;
+    const start = performance.now();
+    const durationMs = 1500;
+    let frameId = null;
+
+    const animate = (timestamp) => {
+      const elapsed = timestamp - start;
+      const t = Math.min(1, elapsed / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setAltitudeIntroProgress(eased);
+
+      if (t < 1) {
+        frameId = requestAnimationFrame(animate);
+      }
+    };
+
+    frameId = requestAnimationFrame(animate);
+    return () => {
+      if (frameId !== null) cancelAnimationFrame(frameId);
+    };
+  }, [polygonData]);
 
   useEffect(() => {
     if (!globeReady || !globeRef.current) return undefined;
 
     const controls = globeRef.current.controls();
+    const globeMaterial =
+      typeof globeRef.current.globeMaterial === 'function'
+        ? globeRef.current.globeMaterial()
+        : null;
     if (!controls) return undefined;
+
+    if (globeMaterial) {
+      globeMaterial.emissive = new THREE.Color('#1d4ed8');
+      globeMaterial.emissiveIntensity = 0.22;
+      globeMaterial.shininess = 1.4;
+    }
 
     controls.minDistance = 70;
     controls.maxDistance = 800;
@@ -171,15 +303,16 @@ export default function MapView({ hexCells, selectedHex, onHexClick }) {
         height={dimensions.height}
         globeImageUrl="https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
         backgroundColor="#dbeafe"
-        atmosphereColor="#93c5fd"
-        atmosphereAltitude={0.12}
+        atmosphereColor="#1d4ed8"
+        atmosphereAltitude={0.25}
         polygonsData={polygonData}
         polygonGeoJsonGeometry={(d) => d.geoJson}
         polygonAltitude={(d) => {
-          const base = d.threat_score / 60000;
-          const anomalyBoost = d.anomaly_flag === 1 ? 2 : 1;
-          const selectedBoost = d.hex_id === selectedHex?.hex_id ? 2.4 : 1;
-          return base * anomalyBoost * selectedBoost;
+          const base = d.threat_score / 110000;
+          const anomalyBoost = d.anomaly_flag === 1 ? 1.4 : 1;
+          const selectedBoost = d.hex_id === selectedHex?.hex_id ? 1.7 : 1;
+          const cinematicBoost = 1.1;
+          return base * anomalyBoost * selectedBoost * cinematicBoost * altitudeIntroProgress;
         }}
         polygonCapColor={(d) =>
           d.hex_id === selectedHex?.hex_id ? scoreColor(d.threat_score, 0.35) : 'rgba(255,255,255,0.04)'
@@ -208,6 +341,23 @@ export default function MapView({ hexCells, selectedHex, onHexClick }) {
         }}
         labelColor={(d) => scoreColor(d.threat_score, 0.95)}
         labelsTransitionDuration={250}
+        arcsData={arcConnections}
+        arcStartLat={(d) => d.startLat}
+        arcStartLng={(d) => d.startLng}
+        arcEndLat={(d) => d.endLat}
+        arcEndLng={(d) => d.endLng}
+        arcColor={(d) =>
+          d.severity >= 75 ? ['rgba(251,146,60,0.45)', 'rgba(239,68,68,0.55)'] : ['rgba(251,146,60,0.25)', 'rgba(249,115,22,0.35)']
+        }
+        arcAltitude={(d) => Math.max(0.008, Math.min(0.028, 0.008 + d.distanceKm / 12000))}
+        arcStroke={0.03}
+        ringsData={threatRingData}
+        ringLat={(d) => d.lat}
+        ringLng={(d) => d.lng}
+        ringColor={(d) => d.color}
+        ringMaxRadius={(d) => d.maxRadius}
+        ringPropagationSpeed={(d) => d.propagationSpeed}
+        ringRepeatPeriod={(d) => d.repeatPeriod}
         polygonLabel={(d) => `
           <div style="
             background:#f8fafc;
@@ -232,6 +382,7 @@ export default function MapView({ hexCells, selectedHex, onHexClick }) {
               ${d.threat_score.toFixed(0)}
             </div>
             <div style="color:#64748b;font-size:10px">THREAT SCORE</div>
+            <div style="color:#64748b;font-size:10px;margin-top:2px">${Math.abs(d.lat).toFixed(2)}°${d.lat >= 0 ? 'N' : 'S'} ${Math.abs(d.lng).toFixed(2)}°${d.lng >= 0 ? 'E' : 'W'}</div>
             ${d.anomaly_flag ? '<div style="color:#ef4444;margin-top:4px">ANOMALY</div>' : ''}
           </div>
         `}
@@ -273,6 +424,8 @@ export default function MapView({ hexCells, selectedHex, onHexClick }) {
         polygonsTransitionDuration={300}
         onGlobeReady={() => setGlobeReady(true)}
       />
+
+      <HexLegend />
     </div>
   );
 }

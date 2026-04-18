@@ -24,8 +24,18 @@ export default function SitrepModal({
   const [sections, setSections] = useState([]);
   const [selectedSectionId, setSelectedSectionId] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [loadingLines, setLoadingLines] = useState([]);
+  const [streamedSitrepText, setStreamedSitrepText] = useState('');
+  const [isStreamingSitrep, setIsStreamingSitrep] = useState(false);
 
   const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  const TERMINAL_BOOT_STEPS = [
+    '> INIT SECURE CHANNEL... OK',
+    '> SYNCING SENSOR FUSION MATRICES... OK',
+    '> INDEXING ALERT FRAGMENTS... OK',
+    '> VALIDATING GEO-THREAT SIGNATURES... OK',
+    '> COMPOSING SITREP PAYLOAD... READY',
+  ];
 
   useEffect(() => {
     const handleEscape = (e) => {
@@ -87,7 +97,65 @@ export default function SitrepModal({
     setSections([]);
     setSelectedSectionId(null);
     setCopied(false);
+    setLoadingLines([]);
+    setStreamedSitrepText('');
+    setIsStreamingSitrep(false);
   }, [isOpen, selectedHex, alerts.length, draftSections.length, sitrepText]);
+
+  useEffect(() => {
+    if (!isOpen || !isLoading) return undefined;
+
+    setLoadingLines([]);
+    let lineIndex = 0;
+    const timer = setInterval(() => {
+      setLoadingLines((prev) => {
+        if (lineIndex >= TERMINAL_BOOT_STEPS.length) {
+          return prev;
+        }
+        const next = [...prev, TERMINAL_BOOT_STEPS[lineIndex]];
+        lineIndex += 1;
+        return next;
+      });
+    }, 380);
+
+    return () => clearInterval(timer);
+  }, [isOpen, isLoading]);
+
+  useEffect(() => {
+    if (!isOpen || !sitrepText) {
+      setStreamedSitrepText('');
+      setIsStreamingSitrep(false);
+      return undefined;
+    }
+
+    setStreamedSitrepText('');
+    setIsStreamingSitrep(true);
+
+    let idx = 0;
+    const timer = setInterval(() => {
+      idx += 1;
+      setStreamedSitrepText(sitrepText.slice(0, idx));
+
+      if (idx >= sitrepText.length) {
+        clearInterval(timer);
+        setIsStreamingSitrep(false);
+      }
+    }, 15);
+
+    return () => clearInterval(timer);
+  }, [isOpen, sitrepText]);
+
+  const sitrepNarrative = isStreamingSitrep ? streamedSitrepText : sitrepText;
+
+  useEffect(() => {
+    if (!sitrepNarrative) return;
+
+    setSections((prev) =>
+      prev.map((section) =>
+        section.id === 'scope-generated' ? { ...section, body: sitrepNarrative } : section
+      )
+    );
+  }, [sitrepNarrative]);
 
   const buildSectionsFromScope = () => {
     const built = [];
@@ -133,7 +201,7 @@ export default function SitrepModal({
       built.push({
         id: 'scope-generated',
         title: 'Model Generated SITREP',
-        body: sitrepText,
+        body: sitrepNarrative,
       });
     }
 
@@ -211,24 +279,24 @@ export default function SitrepModal({
 
   return (
     <div
-      className="fixed inset-0 bg-slate-900/45 flex items-center justify-center p-3 sm:p-5 z-[2100]"
+      className="fixed inset-0 bg-black/70 flex items-center justify-center p-3 sm:p-5 z-[2100]"
       onClick={handleOverlayClick}
     >
       <div
         ref={modalRef}
         role="dialog"
         aria-modal="true"
-        className="bg-white border border-slate-300 rounded-lg w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col"
+        className="bg-[#060d0b] border border-emerald-500/35 rounded-lg w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col text-emerald-100"
       >
-        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-200">
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-emerald-500/25 bg-[#08120f]">
           <div>
-            <div className="text-xs text-slate-500 uppercase tracking-wide">Intelligence Brief Wizard</div>
-            <div className="text-lg font-bold text-slate-900">{formatHexId(hexId)}</div>
-            <div className="text-xs text-slate-500 mt-1">Step {step} of 3</div>
+            <div className="text-xs text-emerald-300/80 uppercase tracking-[0.16em]">Military Terminal // SITREP Composer</div>
+            <div className="text-lg font-bold text-emerald-100">{formatHexId(hexId)}</div>
+            <div className="text-xs text-emerald-300/80 mt-1">Step {step} of 3</div>
           </div>
           <button
             onClick={onClose}
-            className="text-2xl text-slate-400 hover:text-slate-700 transition-colors"
+            className="text-2xl text-emerald-300/70 hover:text-emerald-200 transition-colors"
             aria-label="Close SITREP modal"
           >
             ×
@@ -240,31 +308,39 @@ export default function SitrepModal({
             {[1, 2, 3].map((index) => (
               <div
                 key={index}
-                className={`h-2 flex-1 rounded ${step >= index ? 'bg-emerald-600' : 'bg-slate-200'}`}
+                className={`h-2 flex-1 rounded ${step >= index ? 'bg-emerald-400' : 'bg-emerald-900/40'}`}
               ></div>
             ))}
           </div>
 
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center h-40 gap-4">
-              <div className="flex gap-1">
-                <span className="dot w-2 h-2 bg-emerald-600 rounded-full"></span>
-                <span className="dot w-2 h-2 bg-emerald-600 rounded-full"></span>
-                <span className="dot w-2 h-2 bg-emerald-600 rounded-full"></span>
+            <div className="h-56 rounded-md border border-emerald-500/35 bg-[#08120f] p-4 sm:p-5 overflow-y-auto">
+              <div className="text-[11px] text-emerald-300 uppercase tracking-[0.16em] mb-3">SITREP Terminal Feed</div>
+              <div className="space-y-2 text-sm font-mono text-emerald-200">
+                {loadingLines.map((line, index) => (
+                  <div key={`${line}-${index}`} className="terminal-line-fade">
+                    {line}
+                  </div>
+                ))}
+                <div className="text-emerald-400/85">
+                  {loadingLines.length >= TERMINAL_BOOT_STEPS.length
+                    ? '> AWAITING MODEL RESPONSE...'
+                    : '> BOOTSTRAPPING...'}
+                  <span className="terminal-cursor">_</span>
+                </div>
               </div>
-              <p className="text-sm text-slate-500">Generating SITREP...</p>
             </div>
           ) : step === 1 ? (
             <div className="space-y-4">
               <div>
-                <div className="text-sm font-semibold text-slate-800">1) Select scope</div>
-                <p className="text-xs text-slate-600 mt-1">Choose what to include in this SITREP draft.</p>
+                <div className="text-sm font-semibold text-emerald-100">1) Select scope</div>
+                <p className="text-xs text-emerald-300/80 mt-1">Choose what to include in this SITREP draft.</p>
               </div>
 
-              <label className="flex items-center justify-between border border-slate-200 rounded p-3 bg-slate-50">
+              <label className="flex items-center justify-between border border-emerald-500/25 rounded p-3 bg-[#08120f]">
                 <div>
-                  <div className="text-sm font-semibold text-slate-800">Selected sector summary</div>
-                  <div className="text-xs text-slate-500">Use the currently pinned map sector.</div>
+                  <div className="text-sm font-semibold text-emerald-100">Selected sector summary</div>
+                  <div className="text-xs text-emerald-300/75">Use the currently pinned map sector.</div>
                 </div>
                 <input
                   type="checkbox"
@@ -274,10 +350,10 @@ export default function SitrepModal({
                 />
               </label>
 
-              <label className="flex items-center justify-between border border-slate-200 rounded p-3 bg-slate-50">
+              <label className="flex items-center justify-between border border-emerald-500/25 rounded p-3 bg-[#08120f]">
                 <div>
-                  <div className="text-sm font-semibold text-slate-800">Triggered alert snapshot</div>
-                  <div className="text-xs text-slate-500">Add latest alert events relevant to this brief.</div>
+                  <div className="text-sm font-semibold text-emerald-100">Triggered alert snapshot</div>
+                  <div className="text-xs text-emerald-300/75">Add latest alert events relevant to this brief.</div>
                 </div>
                 <input
                   type="checkbox"
@@ -287,10 +363,10 @@ export default function SitrepModal({
                 />
               </label>
 
-              <label className="flex items-center justify-between border border-slate-200 rounded p-3 bg-slate-50">
+              <label className="flex items-center justify-between border border-emerald-500/25 rounded p-3 bg-[#08120f]">
                 <div>
-                  <div className="text-sm font-semibold text-slate-800">Chat insights</div>
-                  <div className="text-xs text-slate-500">Include analyst chat findings added from chat actions.</div>
+                  <div className="text-sm font-semibold text-emerald-100">Chat insights</div>
+                  <div className="text-xs text-emerald-300/75">Include analyst chat findings added from chat actions.</div>
                 </div>
                 <input
                   type="checkbox"
@@ -300,10 +376,10 @@ export default function SitrepModal({
                 />
               </label>
 
-              <label className="flex items-center justify-between border border-slate-200 rounded p-3 bg-slate-50">
+              <label className="flex items-center justify-between border border-emerald-500/25 rounded p-3 bg-[#08120f]">
                 <div>
-                  <div className="text-sm font-semibold text-slate-800">Model-generated SITREP</div>
-                  <div className="text-xs text-slate-500">Include backend narrative output if available.</div>
+                  <div className="text-sm font-semibold text-emerald-100">Model-generated SITREP</div>
+                  <div className="text-xs text-emerald-300/75">Include backend narrative output if available.</div>
                 </div>
                 <input
                   type="checkbox"
@@ -314,19 +390,19 @@ export default function SitrepModal({
               </label>
 
               {!sitrepText && (
-                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                <p className="text-xs text-amber-200 bg-amber-700/20 border border-amber-500/30 rounded p-2">
                   Model-generated SITREP is not loaded yet. You can still create a report from sector, alert, and chat context.
                 </p>
               )}
 
-              {error && <p className="text-xs text-red-600">{error}</p>}
+              {error && <p className="text-xs text-red-300">{error}</p>}
             </div>
           ) : step === 2 ? (
             <div className="space-y-4">
-              <div className="text-sm font-semibold text-slate-800">2) Review findings</div>
+              <div className="text-sm font-semibold text-emerald-100">2) Review findings</div>
 
               {sections.length === 0 ? (
-                <p className="text-sm text-slate-500">No sections selected. Go back and choose at least one scope item.</p>
+                <p className="text-sm text-emerald-300/80">No sections selected. Go back and choose at least one scope item.</p>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-3">
                   <div className="space-y-2">
@@ -334,7 +410,7 @@ export default function SitrepModal({
                       <button
                         key={section.id}
                         onClick={() => setSelectedSectionId(section.id)}
-                        className={`w-full text-left text-xs px-3 py-2 rounded border ${selectedSection?.id === section.id ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'}`}
+                        className={`w-full text-left text-xs px-3 py-2 rounded border ${selectedSection?.id === section.id ? 'bg-emerald-500/15 text-emerald-100 border-emerald-400/45' : 'bg-[#08120f] text-emerald-200 border-emerald-500/25 hover:bg-emerald-500/10'}`}
                       >
                         {section.title}
                       </button>
@@ -344,18 +420,18 @@ export default function SitrepModal({
                   {selectedSection && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-semibold text-slate-800">{selectedSection.title}</div>
+                        <div className="text-sm font-semibold text-emerald-100">{selectedSection.title}</div>
                         <div className="flex gap-1 flex-wrap justify-end">
-                          <button onClick={() => applySuggestion(selectedSection.id, 'impact')} className="text-[11px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100">Add impact</button>
-                          <button onClick={() => applySuggestion(selectedSection.id, 'recommendation')} className="text-[11px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100">Add recommendation</button>
-                          <button onClick={() => applySuggestion(selectedSection.id, 'source')} className="text-[11px] px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100">Add source note</button>
+                          <button onClick={() => applySuggestion(selectedSection.id, 'impact')} className="text-[11px] px-2 py-1 rounded border border-emerald-400/35 bg-[#08120f] text-emerald-100 hover:bg-emerald-500/10">Add impact</button>
+                          <button onClick={() => applySuggestion(selectedSection.id, 'recommendation')} className="text-[11px] px-2 py-1 rounded border border-emerald-400/35 bg-[#08120f] text-emerald-100 hover:bg-emerald-500/10">Add recommendation</button>
+                          <button onClick={() => applySuggestion(selectedSection.id, 'source')} className="text-[11px] px-2 py-1 rounded border border-emerald-400/35 bg-[#08120f] text-emerald-100 hover:bg-emerald-500/10">Add source note</button>
                         </div>
                       </div>
 
                       <textarea
                         value={selectedSection.body}
                         onChange={(e) => updateSectionBody(selectedSection.id, e.target.value)}
-                        className="w-full min-h-[260px] rounded border border-slate-300 p-3 text-sm text-slate-800 focus:outline-none focus:border-slate-500"
+                        className="w-full min-h-[260px] rounded border border-emerald-500/35 bg-[#08120f] p-3 text-sm text-emerald-100 focus:outline-none focus:border-emerald-300"
                       />
                     </div>
                   )}
@@ -365,22 +441,22 @@ export default function SitrepModal({
           ) : (
             <div className="space-y-4">
               <div>
-                <div className="text-sm font-semibold text-slate-800">3) Export</div>
-                <p className="text-xs text-slate-600 mt-1">Final SITREP preview</p>
+                <div className="text-sm font-semibold text-emerald-100">3) Export</div>
+                <p className="text-xs text-emerald-300/80 mt-1">Final SITREP preview</p>
               </div>
 
-              <div className="font-mono text-sm text-slate-800 whitespace-pre-wrap leading-relaxed bg-slate-900/5 border border-slate-200 rounded-md p-3 sm:p-4 max-h-[420px] overflow-y-auto">
+              <div className="font-mono text-sm text-emerald-100 whitespace-pre-wrap leading-relaxed bg-[#08120f] border border-emerald-500/30 rounded-md p-3 sm:p-4 max-h-[420px] overflow-y-auto">
                 {compiledReport || 'No content generated yet.'}
               </div>
             </div>
           )}
         </div>
 
-        <div className="p-4 sm:p-5 border-t border-slate-200 space-y-2">
+        <div className="p-4 sm:p-5 border-t border-emerald-500/25 space-y-2 bg-[#08120f]">
           {step === 1 && (
             <button
               onClick={moveToReview}
-              className="w-full bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
+              className="w-full bg-emerald-700/80 hover:bg-emerald-600 text-emerald-50 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
             >
               Review Findings
             </button>
@@ -390,14 +466,14 @@ export default function SitrepModal({
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => setStep(1)}
-                className="w-full bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
+                className="w-full bg-[#060d0b] hover:bg-emerald-500/10 text-emerald-100 border border-emerald-500/35 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
               >
                 Back to Scope
               </button>
               <button
                 onClick={() => setStep(3)}
                 disabled={sections.length === 0}
-                className="w-full bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
+                className="w-full bg-emerald-700/80 hover:bg-emerald-600 disabled:opacity-50 text-emerald-50 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
               >
                 Continue to Export
               </button>
@@ -409,14 +485,14 @@ export default function SitrepModal({
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => setStep(2)}
-                  className="w-full bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
+                  className="w-full bg-[#060d0b] hover:bg-emerald-500/10 text-emerald-100 border border-emerald-500/35 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
                 >
                   Back to Review
                 </button>
                 <button
                   onClick={handleDownload}
                   disabled={!compiledReport}
-                  className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
+                  className="w-full bg-emerald-700/85 hover:bg-emerald-600 disabled:opacity-50 text-emerald-50 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
                 >
                   Export .txt
                 </button>
@@ -425,7 +501,7 @@ export default function SitrepModal({
               <button
                 onClick={handleCopy}
                 disabled={!compiledReport}
-                className="w-full bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
+                className="w-full bg-emerald-700/85 hover:bg-emerald-600 disabled:opacity-50 text-emerald-50 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
               >
                 {copied ? 'Copied' : 'Copy SITREP Content'}
               </button>
@@ -433,7 +509,7 @@ export default function SitrepModal({
               {draftSections.length > 0 && (
                 <button
                   onClick={onClearDraftSections}
-                  className="w-full bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
+                  className="w-full bg-[#060d0b] hover:bg-emerald-500/10 text-emerald-100 border border-emerald-500/35 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
                 >
                   Clear Draft Sections
                 </button>
@@ -444,7 +520,7 @@ export default function SitrepModal({
           {step !== 3 && (
             <button
               onClick={onClose}
-              className="w-full bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
+              className="w-full bg-[#060d0b] hover:bg-emerald-500/10 text-emerald-100 border border-emerald-500/35 font-semibold py-2.5 px-4 rounded text-sm uppercase tracking-wide transition-colors"
             >
               Close
             </button>

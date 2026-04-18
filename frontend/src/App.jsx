@@ -1,14 +1,20 @@
 import { useState, useEffect } from 'react';
 import MapView from './components/MapView.jsx';
+import LeafletView from './components/LeafletView.jsx';
 import SidePanel from './components/SidePanel.jsx';
 import SitrepModal from './components/SitrepModal.jsx';
 import ChatPanel from './components/ChatPanel.jsx';
 import AlertFeed from './components/AlertFeed.jsx';
 import AlertModal from './components/AlertModal.jsx';
 import Navbar from './components/Navbar.jsx';
+import ThreatTicker from './components/ThreatTicker.jsx';
 import { fetchHexGrid, fetchHexDetail, postAlert, generateSitrep } from './api.js';
 
 export default function App() {
+  const [viewMode, setViewMode] = useState('globe');
+  const [mapInitialCenter, setMapInitialCenter] = useState(null);
+  const [showHint, setShowHint] = useState(false);
+  const [hintFading, setHintFading] = useState(false);
   const [hexCells, setHexCells] = useState([]);
   const [selectedHex, setSelectedHex] = useState(null);
   const [hexDetail, setHexDetail] = useState(null);
@@ -33,6 +39,21 @@ export default function App() {
       setIsLoading(false);
     };
     loadHexGrid();
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('hint_shown')) return;
+    } catch {
+      return;
+    }
+
+    setShowHint(true);
+    const timer = setTimeout(() => {
+      dismissHint();
+    }, 5000);
+
+    return () => clearTimeout(timer);
   }, []);
 
   // Handle hex click
@@ -62,7 +83,9 @@ export default function App() {
     setSitrepError('');
     setSitrepLoading(true);
 
-    const { data, error } = await generateSitrep(selectedHex.hex_id);
+    const minDelay = new Promise((resolve) => setTimeout(resolve, 2000));
+    const request = generateSitrep(selectedHex.hex_id);
+    const [{ data, error }] = await Promise.all([request, minDelay]);
     setSitrepLoading(false);
 
     if (data?.sitrep) {
@@ -116,17 +139,57 @@ export default function App() {
     }
   };
 
+  const dismissHint = () => {
+    if (!showHint && !hintFading) return;
+    setHintFading(true);
+
+    try {
+      localStorage.setItem('hint_shown', 'true');
+    } catch {
+      // ignore storage errors
+    }
+
+    setTimeout(() => {
+      setShowHint(false);
+      setHintFading(false);
+    }, 350);
+  };
+
+  const handleSwitchToMap = (center) => {
+    if (center?.lat != null && center?.lng != null) {
+      setMapInitialCenter({ lat: center.lat, lng: center.lng });
+    }
+    setViewMode('map');
+  };
+
+  const handleViewModeChange = (mode) => {
+    if (mode === 'map') {
+      if (selectedHex?.lat != null && selectedHex?.lng != null) {
+        setMapInitialCenter({ lat: selectedHex.lat, lng: selectedHex.lng });
+      } else {
+        setMapInitialCenter(null);
+      }
+    }
+    setViewMode(mode);
+  };
+
   const anomalyCount = hexCells.filter((c) => c.anomaly_flag === 1).length;
   const mapHighRiskCount = hexCells.filter((c) => c.threat_score > 60).length;
   const lastUpdated = new Date().toISOString();
 
   return (
-    <div className="w-screen h-screen bg-slate-100 text-slate-900 overflow-hidden flex flex-col">
-      <Navbar lastUpdated={lastUpdated} hexCount={hexCells.length} anomalyCount={anomalyCount} />
+    <div className="w-screen h-screen gs-shell overflow-hidden flex flex-col">
+      <Navbar
+        lastUpdated={lastUpdated}
+        hexCount={hexCells.length}
+        anomalyCount={anomalyCount}
+        viewMode={viewMode}
+        onViewModeChange={handleViewModeChange}
+      />
 
-      <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3">
+      <div className="gs-panel border-b px-4 md:px-6 py-3">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          <p className="text-sm text-slate-600">
+          <p className="text-sm gs-muted">
             What this map shows: each sector is color-coded by current threat risk, with high-risk sectors requiring immediate attention.
           </p>
           <div className="flex flex-wrap gap-2">
@@ -162,14 +225,37 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[60%_40%]">
-        <div className="min-h-[45vh] xl:min-h-0 border-b xl:border-b-0 xl:border-r border-slate-300">
-          <MapView
-            hexCells={hexCells}
-            selectedHex={selectedHex}
-            onHexClick={handleHexClick}
-            isLoading={isLoading}
-          />
+      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[65%_25%_10%]">
+        <div
+          className="relative min-h-[45vh] xl:min-h-0 border-b xl:border-b-0 xl:border-r border-slate-300"
+          onPointerDown={dismissHint}
+        >
+          {viewMode === 'globe' ? (
+            <MapView
+              hexCells={hexCells}
+              selectedHex={selectedHex}
+              onHexClick={handleHexClick}
+              onSwitchToMap={handleSwitchToMap}
+            />
+          ) : (
+            <LeafletView
+              hexCells={hexCells}
+              selectedHex={selectedHex}
+              onHexClick={handleHexClick}
+              initialCenter={mapInitialCenter}
+              initialZoom={9}
+            />
+          )}
+
+          {showHint && (
+            <div
+              className={`absolute left-1/2 -translate-x-1/2 bottom-3 z-[1400] px-4 py-2 rounded-full border border-slate-600 bg-slate-900/92 text-white text-xs shadow-lg font-ui tracking-[0.06em] ${
+                hintFading ? 'map-hint-exit' : 'map-hint-enter'
+              }`}
+            >
+              🖱 Drag to rotate  •  Scroll to zoom  •  Click a sector to inspect
+            </div>
+          )}
         </div>
 
         <div className="min-h-0 bg-slate-50">
@@ -181,7 +267,23 @@ export default function App() {
             onOpenChat={() => setShowChat(true)}
           />
         </div>
+
+        <div className="hidden xl:block min-h-0">
+          <AlertFeed
+            alerts={alerts}
+            onAlertClick={handleAlertClick}
+            isLoading={isLoading}
+            mapHighRiskCount={mapHighRiskCount}
+            onOpenAlerts={() => setShowAlertModal(true)}
+          />
+        </div>
       </div>
+
+      <ThreatTicker
+        hexCells={hexCells}
+        onSelectHex={handleHexClick}
+        selectedHexId={selectedHex?.hex_id || ''}
+      />
 
       <SitrepModal
         isOpen={showSitrep}
